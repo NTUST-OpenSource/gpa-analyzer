@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -167,8 +170,60 @@ def test_csp_allows_the_web_manifest(client):
     assert "manifest-src 'self'" in client.get("/login").headers["content-security-policy"]
 
 
-def test_api_is_rate_limited(authed_client, monkeypatch):
+def test_api_is_rate_limited_per_session(authed_client, monkeypatch):
     monkeypatch.setattr(web, "_fetch_grade_data", lambda u, p: dict(GRADE_DATA))
     for _ in range(web.API_RATE[0]):
         authed_client.get("/api/grade-data")
     assert authed_client.get("/api/grade-data").status_code == 429
+
+
+def test_concurrent_wrong_passwords_cannot_outrun_the_lockout(client, monkeypatch):
+    """Regression: the budget must be consumed before the slow upstream call."""
+    monkeypatch.setattr(web, "_verify_credentials", lambda u, p: time.sleep(0.3) or False)
+
+    codes: list[int] = []
+    lock = threading.Lock()
+
+    def attempt():
+        status = client.post(
+            "/login", data={"username": "B11234567", "password": "bad"}
+        ).status_code
+        with lock:
+            codes.append(status)
+
+    threads = [threading.Thread(target=attempt) for _ in range(web.LOGIN_FAILURE_RATE[0] + 3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=20)
+
+    assert codes.count(401) <= web.LOGIN_FAILURE_RATE[0]
+    assert 429 in codes
+
+
+def test_malformed_origin_is_rejected_not_a_server_error(client):
+    """Regression: urlsplit raised ValueError out of the handler, returning 500."""
+    r = client.post(
+        "/login", data={"username": "u", "password": "p"}, headers={"origin": "http://[oops"}
+    )
+    assert r.status_code == 403
+
+
+def test_upstream_outage_does_not_lock_out_the_account(client, monkeypatch):
+    """Regression: 502s consumed the failure budget, locking out the right password."""
+
+    def outage(u, p):
+        raise RuntimeError("upstream down")
+
+    monkeypatch.setattr(web, "_verify_credentials", outage)
+    for _ in range(web.LOGIN_FAILURE_RATE[0] + 2):
+        assert (
+            client.post("/login", data={"username": "B11234567", "password": "pw"}).status_code
+            == 502
+        )
+
+    monkeypatch.setattr(web, "_verify_credentials", lambda u, p: True)
+    r = client.post(
+        "/login", data={"username": "B11234567", "password": "pw"}, follow_redirects=False
+    )
+    assert r.status_code == 302

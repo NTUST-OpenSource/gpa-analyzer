@@ -1,5 +1,9 @@
 import json
+import os
 import stat
+import subprocess
+import sys
+import textwrap
 import time
 
 import pytest
@@ -102,12 +106,32 @@ def test_rate_limiter_blocks_after_limit():
     assert limiter.allow("other") is True
 
 
-def test_rate_limiter_check_does_not_consume_budget():
+def test_rate_limiter_refund_returns_budget():
     limiter = web.RateLimiter(limit=1, window=300)
-    assert limiter.check("k") is True
-    assert limiter.check("k") is True
-    limiter.record("k")
-    assert limiter.check("k") is False
+    assert limiter.allow("k") is True
+    assert limiter.allow("k") is False
+    limiter.refund("k")
+    assert limiter.allow("k") is True
+
+
+def test_restored_cookies_are_pinned_to_the_portal_host(scraper_factory):
+    """Regression: unscoped cookies were sent to every host, including over HTTP."""
+    s = scraper_factory("B11234567", "pw")
+    s.client.cookies.set("StuScoreQueryServ", "session-value")
+    s._store_cookies()
+
+    fresh = scraper_factory("B11234567", "pw")
+    assert fresh._load_cached_cookies() is True
+    portal = fresh.client.build_request("GET", f"https://{NtustGradeScraper.PORTAL_HOST}/x")
+    elsewhere = fresh.client.build_request("GET", "http://evil.example.com/x")
+    assert "StuScoreQueryServ" in (portal.headers.get("cookie") or "")
+    assert elsewhere.headers.get("cookie") is None
+
+
+def test_student_info_cache_is_not_a_plaintext_roster(scraper_factory):
+    s = scraper_factory("B11234567", "pw")
+    assert s._info_key != s.username
+    assert len(s._info_key) == 64
 
 
 def test_cache_dir_is_read_at_call_time(tmp_path, monkeypatch):
@@ -137,3 +161,54 @@ def test_expired_entries_are_pruned_on_write(scraper_factory, monkeypatch):
 
     with open(fresh._cookie_cache_file, encoding="utf-8") as f:
         assert len(json.load(f)) == 1
+
+
+def test_rate_limiter_prunes_at_most_once_per_window():
+    """Regression: pruning ran on every call, making each request O(number of keys)."""
+    limiter = web.RateLimiter(limit=5, window=300)
+    for i in range(2000):
+        limiter.allow(f"key-{i}")
+
+    scans = 0
+    original = limiter._maybe_prune
+
+    def counting(now):
+        nonlocal scans
+        before = limiter._next_prune
+        original(now)
+        if limiter._next_prune != before:
+            scans += 1
+
+    limiter._maybe_prune = counting
+    for i in range(2000):
+        limiter.allow(f"more-{i}")
+    assert scans == 0
+
+
+def test_cache_writes_survive_a_concurrent_process(tmp_path, monkeypatch):
+    """The in-process lock does not cross processes; flock must."""
+    monkeypatch.setenv("CACHE_DIR", str(tmp_path))
+    script = textwrap.dedent(f"""
+        import os, sys
+        os.environ["CACHE_DIR"] = {str(tmp_path)!r}
+        os.environ["SECRET_KEY"] = os.environ.get("SECRET_KEY", "k")
+        sys.path.insert(0, {str(gpa.ROOT)!r})
+        from GpaAnalyzer import NtustGradeScraper
+        for i in range(20):
+            s = NtustGradeScraper(f"{{sys.argv[1]}}-{{i}}", "pw")
+            s.client.cookies.set("StuScoreQueryServ", "v")
+            s._store_cookies()
+            s.close()
+    """)
+    path = tmp_path / "worker.py"
+    path.write_text(script, encoding="utf-8")
+
+    procs = [
+        subprocess.Popen([sys.executable, str(path), tag], env={**os.environ})
+        for tag in ("alpha", "beta")
+    ]
+    for p in procs:
+        assert p.wait(timeout=60) == 0
+
+    with open(tmp_path / "cookie_cache.json", encoding="utf-8") as f:
+        assert len(json.load(f)) == 40

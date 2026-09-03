@@ -67,7 +67,9 @@ services:
       - "8000:8000"
     environment:
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
-      FORWARDED_ALLOW_IPS: 127.0.0.1
+      # Address of the reverse proxy in front of this service, so client IPs are
+      # read from X-Forwarded-For. Leave unset if nothing proxies to it.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     volumes:
       - cache:/data
 
@@ -103,7 +105,7 @@ uv sync
 |---|---|---|
 | `SECRET_KEY` | 無，**必填** | Fernet 金鑰，用來加密 session cookie。未設定時服務不會啟動 |
 | `COOKIE_SECURE` | `true` | session cookie 是否只走 HTTPS。設為 `true` 時 cookie 會加上 `__Host-` 前綴 |
-| `PORT` | `8000`（`start.sh` 為 `20001`） | 監聽埠號 |
+| `HOST` / `PORT` | `0.0.0.0` / `8000`（`start.sh` 為 `20001`） | 監聽位址與埠號 |
 | `CACHE_DIR` | `.cache`（容器內為 `/data`） | 爬蟲快取存放位置 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 信任 `X-Forwarded-For` 的來源 IP，**請填實際反向代理的位址** |
 | `TRUSTED_ORIGINS` | 空 | 額外接受的 Origin 主機名稱，以逗號分隔。僅在反向代理會改寫 `Host` 時需要 |
@@ -171,6 +173,10 @@ npm run build              # 產出 static/vendor/tailwind.css
 ```
 
 CI 會檢查 `static/vendor/tailwind.css` 是否為最新，忘了重新建置會失敗。
+
+> [!NOTE]
+> Dependabot 只會改 `package.json` 與 `package-lock.json`，不會重新產生 CSS。
+> 若 Tailwind 升級的 PR 因此變紅，在該分支上跑 `npm ci && npm run build` 並提交結果即可。
 
 ### 專案結構
 

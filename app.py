@@ -37,9 +37,10 @@ def _int_env(name: str, default: int) -> int:
 
 RATE_WINDOW = 300
 
-# Failures are what indicate brute force, so only those are counted per account.
-# Attempts are capped separately and generously, because a campus NAT puts many
-# legitimate students behind a single address.
+# Brute force is bounded per account, which is the identity an attacker is
+# actually guessing at. Addresses only get the generous attempt cap: a campus
+# NAT, or a proxy whose forwarded headers are not trusted, collapses many
+# students onto one address and must not be able to lock the account budget.
 LOGIN_FAILURE_RATE = (_int_env("LOGIN_FAILURE_LIMIT", 5), RATE_WINDOW)
 LOGIN_ATTEMPT_RATE = (_int_env("LOGIN_ATTEMPT_LIMIT", 120), RATE_WINDOW)
 API_RATE = (_int_env("API_RATE_LIMIT", 30), RATE_WINDOW)
@@ -90,29 +91,25 @@ app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
 
 
 class RateLimiter:
+    MAX_KEYS = 50_000
+
     def __init__(self, limit: int, window: int):
         self._limit = limit
         self._window = window
         self._hits: defaultdict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
+        self._next_prune = 0.0
 
-    def check(self, key: str) -> bool:
-        """Reports whether the key is under its limit without consuming budget."""
+    def refund(self, key: str) -> None:
         with self._lock:
-            return len(self._fresh(key, time.monotonic())) < self._limit
-
-    def record(self, key: str) -> None:
-        now = time.monotonic()
-        with self._lock:
-            if len(self._hits) > 10_000:
-                self._prune(now)
-            self._fresh(key, now).append(now)
+            hits = self._hits.get(key)
+            if hits:
+                hits.pop()
 
     def allow(self, key: str) -> bool:
         now = time.monotonic()
         with self._lock:
-            if len(self._hits) > 10_000:
-                self._prune(now)
+            self._maybe_prune(now)
             hits = self._fresh(key, now)
             if len(hits) >= self._limit:
                 return False
@@ -125,9 +122,17 @@ class RateLimiter:
             hits.popleft()
         return hits
 
-    def _prune(self, now: float) -> None:
+    def _maybe_prune(self, now: float) -> None:
+        """Amortised: scanning every call made each request O(number of keys)."""
+        if now < self._next_prune:
+            return
+        self._next_prune = now + self._window
         for key in [k for k, v in self._hits.items() if not v or now - v[-1] > self._window]:
             del self._hits[key]
+        if len(self._hits) > self.MAX_KEYS:
+            stale_first = sorted(self._hits, key=lambda k: self._hits[k][-1])
+            for key in stale_first[: len(self._hits) - self.MAX_KEYS]:
+                del self._hits[key]
 
 
 login_failures = RateLimiter(*LOGIN_FAILURE_RATE)
@@ -142,11 +147,12 @@ def _client_key(request: Request) -> str:
 def _require_same_origin(request: Request) -> None:
     """Rejects cross-site form posts; SameSite cookies alone do not cover login CSRF."""
     source = request.headers.get("origin") or request.headers.get("referer")
-    if not source:
+    if source is None:
         return
-    host = urlsplit(source).netloc.lower()
-    if not host:
-        return
+    try:
+        host = urlsplit(source).netloc.lower()
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Malformed origin.") from None
     allowed = {(request.headers.get("host") or "").lower()} | TRUSTED_ORIGINS
     if host not in allowed:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
@@ -197,7 +203,7 @@ def get_credentials(request: Request) -> tuple[str, str] | None:
         raw = FERNET.decrypt(token.encode("utf-8"), ttl=SESSION_MAX_AGE)
         cred = json.loads(raw.decode("utf-8"))
         username, password = cred["u"], cred["p"]
-    except InvalidToken, ValueError, TypeError, KeyError, json.JSONDecodeError:
+    except InvalidToken, ValueError, TypeError, KeyError:
         return None
     if not isinstance(username, str) or not isinstance(password, str):
         return None
@@ -223,12 +229,7 @@ async def do_login(request: Request, username: str = Form(...), password: str = 
     client = _client_key(request)
     user_key = hashlib.sha256(username.encode("utf-8")).hexdigest()
 
-    throttled = (
-        not login_attempts.allow(client)
-        or not login_failures.check(client)
-        or not login_failures.check(user_key)
-    )
-    if throttled:
+    if not login_attempts.allow(client) or not login_failures.allow(user_key):
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -240,19 +241,21 @@ async def do_login(request: Request, username: str = Form(...), password: str = 
         authenticated = await run_in_threadpool(_verify_credentials, username, password)
     except Exception:
         logger.exception("Login failed for an unexpected reason")
+        login_failures.refund(user_key)
         return templates.TemplateResponse(
             request, "login.html", {"error": "Service temporarily unavailable."}, status_code=502
         )
 
     if not authenticated:
-        login_failures.record(client)
-        login_failures.record(user_key)
         return templates.TemplateResponse(
             request,
             "login.html",
             {"error": "Login failed, please check your credentials."},
             status_code=401,
         )
+
+    # Refund on success so ordinary sign-ins never count toward the lockout.
+    login_failures.refund(user_key)
 
     response = RedirectResponse(url="/", status_code=302)
     set_session(response, username, password)
@@ -299,7 +302,7 @@ async def api_grade_data(request: Request):
     if not credentials:
         raise HTTPException(status_code=401, detail="Not logged in or session expired.")
 
-    if not api_limiter.allow(_client_key(request)):
+    if not api_limiter.allow(hashlib.sha256(credentials[0].encode("utf-8")).hexdigest()):
         raise HTTPException(status_code=429, detail="Too many requests. Please wait a few minutes.")
 
     try:

@@ -67,7 +67,9 @@ services:
       - "8000:8000"
     environment:
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
-      FORWARDED_ALLOW_IPS: 127.0.0.1
+      # Address of the reverse proxy in front of this service, so client IPs are
+      # read from X-Forwarded-For. Leave unset if nothing proxies to it.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     volumes:
       - cache:/data
 
@@ -103,7 +105,7 @@ Everything is configured through environment variables, which may live in `.env`
 |---|---|---|
 | `SECRET_KEY` | none, **required** | Fernet key used to encrypt session cookies. The service refuses to start without it |
 | `COOKIE_SECURE` | `true` | Restrict session cookies to HTTPS. When true, the cookie also gets the `__Host-` prefix |
-| `PORT` | `8000` (`20001` via `start.sh`) | Listening port |
+| `HOST` / `PORT` | `0.0.0.0` / `8000` (`20001` via `start.sh`) | Listening address and port |
 | `CACHE_DIR` | `.cache` (`/data` in the container) | Where the scraper stores its caches |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Which peers may set `X-Forwarded-For`. **Set this to your actual reverse proxy** |
 | `TRUSTED_ORIGINS` | empty | Extra hostnames accepted in `Origin`, comma separated. Only needed when a proxy rewrites `Host` |
@@ -171,6 +173,10 @@ npm run build              # writes static/vendor/tailwind.css
 ```
 
 CI fails if `static/vendor/tailwind.css` is out of date, so don't skip the rebuild.
+
+> [!NOTE]
+> Dependabot only edits `package.json` and `package-lock.json`; it cannot regenerate the CSS.
+> When a Tailwind bump turns a pull request red, run `npm ci && npm run build` on that branch and commit the result.
 
 ### Project layout
 

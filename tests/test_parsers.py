@@ -64,3 +64,56 @@ def test_parsers_return_empty_on_unrelated_html():
     assert NtustGradeScraper._parse_courses(empty) == []
     assert NtustGradeScraper._parse_rankings(empty) == []
     assert NtustGradeScraper._parse_credits_summary(empty) == {}
+
+
+TBODY_LESS = """
+<div class="box">
+  <h2>歷年學業成績列表</h2>
+  <table class="table table-striped">
+    <tr><td>1</td><td>113-1</td><td>CS1</td><td>演算法</td><td>(3)</td><td>A+</td><td></td><td>核心</td></tr>
+    <tr><td>2</td><td>113-1</td><td>CS2</td><td>作業系統</td><td>4</td><td>C-</td><td></td><td>核心</td></tr>
+  </table>
+</div>
+"""
+
+
+def test_courses_parse_without_a_tbody_element():
+    """Regression: html.parser does not synthesize <tbody>, so rows were dropped."""
+    courses = NtustGradeScraper._parse_courses(BeautifulSoup(TBODY_LESS, "html.parser"))
+    assert [c["course_id"] for c in courses] == ["CS1", "CS2"]
+    assert courses[0]["credits"] == "3"
+    assert courses[1]["grade"] == "C-"
+
+
+def test_decorative_span_does_not_swallow_the_grade():
+    html = """
+    <div class="box"><h2>歷年學業成績列表</h2><table class="table-striped"><tbody>
+      <tr><td>1</td><td>113-1</td><td>CS1</td><td>演算法</td><td>3</td>
+          <td><span class="icon"></span><span class="text-success">B+</span></td>
+          <td></td><td>核心</td></tr>
+    </tbody></table></div>
+    """
+    courses = NtustGradeScraper._parse_courses(BeautifulSoup(html, "html.parser"))
+    assert courses[0]["grade"] == "B+"
+
+
+def test_rankings_tolerate_an_extra_column():
+    html = """
+    <div class="box"><h2>排名資料</h2><table class="table-striped"><tbody>
+      <tr><td>113-1</td><td>3/50</td><td>10/200</td><td>88.5</td>
+          <td>3/50</td><td>10/200</td><td>88.5</td><td>extra</td></tr>
+    </tbody></table></div>
+    """
+    rankings = NtustGradeScraper._parse_rankings(BeautifulSoup(html, "html.parser"))
+    assert len(rankings) == 1
+    assert rankings[0]["semester"] == "113-1"
+
+
+def test_credits_summary_anchors_on_a_th_label():
+    html = """
+    <table><tbody>
+      <tr><th>已實得學分數</th><td>60</td><td>3</td><td>63</td></tr>
+    </tbody></table>
+    """
+    summary = NtustGradeScraper._parse_credits_summary(BeautifulSoup(html, "html.parser"))
+    assert summary["earned_credits"]["total"] == "63"

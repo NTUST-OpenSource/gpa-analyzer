@@ -3,6 +3,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+fi
+
 : "${PORT:=20001}"
 : "${HOST:=0.0.0.0}"
 # Trust forwarded headers only from the reverse proxy in front of this app.

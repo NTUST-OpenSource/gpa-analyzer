@@ -8,6 +8,7 @@ import secrets
 import ssl
 import threading
 import time
+from contextlib import contextmanager
 from functools import cache
 from pathlib import Path
 from typing import Any, ClassVar
@@ -15,6 +16,11 @@ from typing import Any, ClassVar
 import certifi
 import httpx
 from bs4 import BeautifulSoup
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +31,21 @@ STUDENT_INFO_TTL = 7 * 24 * 60 * 60
 
 _cache_lock = threading.Lock()
 _fallback_secret = secrets.token_bytes(32)
+
+
+@contextmanager
+def _locked_cache(path: Path):
+    """Serialises the read-modify-write across threads and across processes."""
+    with _cache_lock:
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        lock_file = path.with_name(f"{path.name}.lock")
+        fd = os.open(lock_file, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            if fcntl is not None:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
 
 
 def cache_path(name: str) -> Path:
@@ -61,11 +82,11 @@ def _prune_expired(cache: dict, ttl: int) -> dict:
 
 def _write_json_atomic(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
     try:
-        with open(tmp, "w", encoding="utf-8") as f:
+        fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.chmod(tmp, 0o600)
         os.replace(tmp, path)
     except OSError as e:
         logger.error("Failed to write %s: %s", path.name, e)
@@ -95,6 +116,7 @@ class NtustGradeScraper:
     )
 
     SSO_HOST: ClassVar[str] = "ssoam2.ntust.edu.tw"
+    PORTAL_HOST: ClassVar[str] = "stuinfosys.ntust.edu.tw"
     URLS: ClassVar[dict[str, str]] = {
         "entry": "https://stuinfosys.ntust.edu.tw/StuScoreQueryServ/StuScoreQuery",
         "sso_root": "https://ssoam2.ntust.edu.tw/",
@@ -129,16 +151,26 @@ class NtustGradeScraper:
     def _student_info_file(self) -> Path:
         return cache_path(self.STUDENT_INFO_NAME)
 
+    def _hmac_key(self, domain: str, *parts: str) -> str:
+        material = domain.encode() + b"\x00"
+        for part in parts:
+            material += f"{len(part)}:{part}".encode() + b"\x00"
+        return hmac.new(_cache_secret(), material, hashlib.sha256).hexdigest()
+
     @property
     def _cache_key(self) -> str:
         """Binds cached cookies to the exact credential pair, not just the username."""
-        material = b"gpa-analyzer/cookie-cache\x00" + f"{self.username}:{self.password}".encode()
-        return hmac.new(_cache_secret(), material, hashlib.sha256).hexdigest()
+        return self._hmac_key("gpa-analyzer/cookie-cache", self.username, self.password)
+
+    @property
+    def _info_key(self) -> str:
+        return self._hmac_key("gpa-analyzer/student-info", self.username)
 
     def _load_cached_cookies(self) -> bool:
         key = self._cache_key
-        with _cache_lock:
-            entry = _read_json(self._cookie_cache_file).get(key)
+        path = self._cookie_cache_file
+        with _locked_cache(path):
+            entry = _read_json(path).get(key)
         if not isinstance(entry, dict):
             return False
         if time.time() - entry.get("timestamp", 0) >= COOKIE_CACHE_TTL:
@@ -147,7 +179,7 @@ class NtustGradeScraper:
         if not isinstance(cookies, dict) or not cookies:
             return False
         for name, value in cookies.items():
-            self.client.cookies.set(name, value)
+            self.client.cookies.set(name, value, domain=self.PORTAL_HOST, path="/")
         return True
 
     def _store_cookies(self) -> None:
@@ -159,14 +191,14 @@ class NtustGradeScraper:
         if not cookies:
             return
         path = self._cookie_cache_file
-        with _cache_lock:
+        with _locked_cache(path):
             cache = _prune_expired(_read_json(path), COOKIE_CACHE_TTL)
             cache[self._cache_key] = {"timestamp": time.time(), "cookies": cookies}
             _write_json_atomic(path, cache)
 
     def _drop_cached_cookies(self) -> None:
         path = self._cookie_cache_file
-        with _cache_lock:
+        with _locked_cache(path):
             cache = _read_json(path)
             if cache.pop(self._cache_key, None) is not None:
                 _write_json_atomic(path, _prune_expired(cache, COOKIE_CACHE_TTL))
@@ -182,7 +214,7 @@ class NtustGradeScraper:
 
             # Cookies were just cleared, so anything but an SSO challenge means the
             # portal never verified this password. A session cookie alone is not proof.
-            if self.SSO_HOST not in str(r_init.url):
+            if r_init.url.host != self.SSO_HOST:
                 logger.warning("Entry point did not redirect to SSO; refusing to authenticate")
                 return False
 
@@ -212,29 +244,33 @@ class NtustGradeScraper:
                 for tag in oidc_form.find_all("input")
                 if (name := tag.get("name"))
             }
-            self.client.post(r_login.url.join(action), data=oidc_data)
+            r_done = self.client.post(r_login.url.join(action), data=oidc_data)
 
+            # Authentication is proven by landing back on the portal holding a
+            # session cookie the portal only issues after SSO succeeds.
+            if r_done.url.host != self.PORTAL_HOST:
+                return False
             if "StuScoreQueryServ" not in self.client.cookies:
                 return False
             self._store_cookies()
             return True
 
-        except (httpx.HTTPError, ValueError) as e:
+        except (httpx.HTTPError, httpx.CookieConflict, ValueError) as e:
             logger.warning("Login transport error: %s", type(e).__name__)
             return False
 
     def _get_student_info(self) -> dict:
         now = time.time()
         path = self._student_info_file
-        with _cache_lock:
+        with _locked_cache(path):
             cache = _read_json(path)
-        entry = cache.get(self.username)
+        entry = cache.get(self._info_key)
         if isinstance(entry, dict) and now - entry.get("timestamp", 0) < STUDENT_INFO_TTL:
             return entry.get("data", {})
 
         try:
             r = self.client.get(self.URLS["student_info_index"])
-            if self.SSO_HOST in str(r.url):
+            if r.url.host == self.SSO_HOST:
                 self._drop_cached_cookies()
                 if not self.login():
                     return {}
@@ -242,14 +278,14 @@ class NtustGradeScraper:
 
             r.raise_for_status()
             info = self._parse_student_info(BeautifulSoup(r.text, "html.parser"))
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, httpx.CookieConflict) as e:
             logger.warning("Student info fetch failed: %s", type(e).__name__)
             return {}
 
         if info:
-            with _cache_lock:
+            with _locked_cache(path):
                 cache = _prune_expired(_read_json(path), STUDENT_INFO_TTL)
-                cache[self.username] = {"timestamp": now, "data": info}
+                cache[self._info_key] = {"timestamp": now, "data": info}
                 _write_json_atomic(path, cache)
         return info
 
@@ -258,7 +294,7 @@ class NtustGradeScraper:
         try:
             r = self.client.get(self.URLS["grades_display"])
 
-            if self.SSO_HOST in str(r.url):
+            if r.url.host == self.SSO_HOST:
                 self._drop_cached_cookies()
                 if not self.login():
                     return {**empty, "error": "session_expired"}
@@ -279,7 +315,7 @@ class NtustGradeScraper:
                 "credits_summary": self._parse_credits_summary(soup),
                 "student_info": student_info,
             }
-        except httpx.HTTPError as e:
+        except (httpx.HTTPError, httpx.CookieConflict) as e:
             logger.warning("Grade fetch failed: %s", type(e).__name__)
             return {**empty, "error": "upstream_unavailable"}
 
@@ -311,18 +347,18 @@ class NtustGradeScraper:
                     grade_table = table
                     break
 
-        if not grade_table or not (tbody := grade_table.find("tbody")):
+        if not grade_table:
             return []
 
         courses = []
-        for row in tbody.find_all("tr"):
+        for row in (grade_table.find("tbody") or grade_table).find_all("tr"):
             cols = row.find_all("td")
             if len(cols) < 8:
                 continue
 
             grade_cell = cols[5]
-            span = grade_cell.find("span")
-            grade_text = (span or grade_cell).get_text(strip=True)
+            spans = [t for span in grade_cell.find_all("span") if (t := span.get_text(strip=True))]
+            grade_text = spans[0] if spans else grade_cell.get_text(strip=True)
             cleaned = [re.sub(r"\s+", " ", c.get_text()).strip() for c in cols]
 
             courses.append(
@@ -349,7 +385,7 @@ class NtustGradeScraper:
         rankings = []
         for row in rows:
             cols = [col.get_text(strip=True) for col in row.find_all("td")]
-            if len(cols) != 7 or "學年期" in cols:
+            if len(cols) < 7 or "學年期" in cols:
                 continue
             rankings.append(
                 {
@@ -366,7 +402,9 @@ class NtustGradeScraper:
 
     @staticmethod
     def _parse_credits_summary(soup: BeautifulSoup) -> dict:
-        anchor = soup.find(lambda tag: tag.name == "td" and "已實得學分數" in tag.get_text())
+        anchor = soup.find(
+            lambda tag: tag.name in ("td", "th") and "已實得學分數" in tag.get_text()
+        )
         if not anchor or not (table := anchor.find_parent("table")):
             return {}
 
@@ -382,7 +420,7 @@ class NtustGradeScraper:
 
         summary = {}
         for row in (table.find("tbody") or table).find_all("tr"):
-            cols = row.find_all("td")
+            cols = row.find_all(["td", "th"])
             if len(cols) < 4:
                 continue
             title = cols[0].get_text(strip=True)
@@ -428,11 +466,15 @@ NON_GRADED = {
 PASSING = {"通過", "P", "PASS"}
 
 
+def semester_sort_key(semester: str) -> tuple[int, ...] | tuple[()]:
+    """Numeric ordering: ROC year 99 must sort before 100, which strings get wrong."""
+    parts = re.findall(r"\d+", str(semester))
+    return tuple(int(p) for p in parts) if parts else ()
+
+
 def _parse_credits(value: Any) -> float:
-    try:
-        return float(str(value).strip("()"))
-    except TypeError, ValueError:
-        return 0.0
+    match = re.search(r"\d+(?:\.\d+)?", str(value))
+    return float(match.group()) if match else 0.0
 
 
 def normalize_grade(grade: Any) -> str | None:
@@ -459,8 +501,10 @@ def analyze_courses(courses: list[dict]) -> dict:
     overall_qp = 0.0
     overall_credits_for_gpa = 0.0
     overall_total_credits = 0.0
+    overall_earned_credits = 0.0
 
-    for semester, items in sorted(by_semester.items()):
+    ordered = sorted(by_semester.items(), key=lambda kv: (semester_sort_key(kv[0]), kv[0]))
+    for semester, items in ordered:
         total_credits = 0.0
         qp = 0.0
         credits_for_gpa = 0.0
@@ -474,6 +518,8 @@ def analyze_courses(courses: list[dict]) -> dict:
 
             total_credits += cr
             gpa_val = grade_to_gpa(letter)
+            if letter == "PASS" or (gpa_val is not None and gpa_val > 0):
+                overall_earned_credits += cr
             if letter != "PASS" and cr > 0 and gpa_val is not None:
                 qp += gpa_val * cr
                 credits_for_gpa += cr
@@ -498,7 +544,8 @@ def analyze_courses(courses: list[dict]) -> dict:
         "per_semester": per_semester,
         "overall": {
             "gpa": round(overall_gpa, 3) if overall_gpa is not None else None,
-            "earned_credits": overall_total_credits,
+            "attempted_credits": overall_total_credits,
+            "earned_credits": overall_earned_credits,
         },
         "grade_map": {
             k: {"gpa": v, "percent_range": list(GRADE_PERCENT_RANGE.get(k, (None, None)))}

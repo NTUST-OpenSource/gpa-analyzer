@@ -19,29 +19,40 @@ const esc = (v) => (v === null || v === undefined) ? '' : String(v).replace(
 );
 
 function renderLegend(containerId, gradeMap) {
-    const rows = GRADE_ORDER.map((letter) => {
-        const row = gradeMap[letter];
-        if (!row) return '';
-        const [low, high] = row.percent_range || [null, null];
-        const range = (low === null || high === null) ? '—' : `${esc(low)}-${esc(high)}`;
-        return `
-            <tr class="border-t border-gray-100">
-                <td class="py-1 pr-2 font-medium text-gray-900 flex items-center">
-                    <span class="inline-block w-3 h-3 mr-2 rounded-sm" style="background-color: ${esc(color(letter))}"></span>
-                    ${esc(letter)}
-                </td>
-                <td class="py-1 pr-2 text-gray-700">${esc(row.gpa)}</td>
-                <td class="py-1 text-gray-500">${range}</td>
-            </tr>
-        `;
-    }).join('');
+    const tbody = document.createElement('tbody');
 
-    const container = document.getElementById(containerId);
-    container.replaceChildren();
+    for (const letter of GRADE_ORDER) {
+        const row = gradeMap[letter];
+        if (!row) continue;
+        const [low, high] = row.percent_range || [null, null];
+
+        const tr = document.createElement('tr');
+        tr.className = 'border-t border-gray-100';
+
+        const nameCell = document.createElement('td');
+        nameCell.className = 'py-1 pr-2 font-medium text-gray-900 flex items-center';
+        const swatch = document.createElement('span');
+        swatch.className = 'inline-block w-3 h-3 mr-2 rounded-sm';
+        // Set through CSSOM: a style attribute would be blocked by style-src 'self'.
+        swatch.style.backgroundColor = color(letter);
+        nameCell.append(swatch, letter);
+
+        const gpaCell = document.createElement('td');
+        gpaCell.className = 'py-1 pr-2 text-gray-700';
+        gpaCell.textContent = row.gpa;
+
+        const rangeCell = document.createElement('td');
+        rangeCell.className = 'py-1 text-gray-500';
+        rangeCell.textContent = (low === null || high === null) ? '—' : `${low}-${high}`;
+
+        tr.append(nameCell, gpaCell, rangeCell);
+        tbody.appendChild(tr);
+    }
+
     const table = document.createElement('table');
     table.className = 'min-w-full';
-    table.innerHTML = `<tbody>${rows}</tbody>`;
-    container.appendChild(table);
+    table.appendChild(tbody);
+    document.getElementById(containerId).replaceChildren(table);
 }
 
 function renderStudentInfo(info) {

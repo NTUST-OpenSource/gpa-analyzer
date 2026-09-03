@@ -1,6 +1,7 @@
 # Secrets
 .env
-.env.local
+.env.*
+!.env.example
 
 # Runtime caches written by the scraper
 cookie_cache.json

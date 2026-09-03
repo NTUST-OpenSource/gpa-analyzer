@@ -28,7 +28,7 @@ RUN groupadd --system --gid 1001 app \
 WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
-COPY --chown=app:app app.py GpaAnalyzer.py ./
+COPY --chown=app:app LICENSE app.py GpaAnalyzer.py ./
 COPY --chown=app:app static/ ./static/
 COPY --chown=app:app templates/ ./templates/
 

@@ -1,6 +1,12 @@
 import pytest
 
-from GpaAnalyzer import _parse_credits, analyze_courses, grade_to_gpa, normalize_grade
+from GpaAnalyzer import (
+    _parse_credits,
+    analyze_courses,
+    grade_to_gpa,
+    normalize_grade,
+    semester_sort_key,
+)
 
 
 @pytest.mark.parametrize(
@@ -84,17 +90,54 @@ def test_semesters_are_sorted_and_overall_is_credit_weighted():
     )
     assert [s["semester"] for s in result["per_semester"]] == ["113-1", "113-2"]
     assert result["overall"]["gpa"] == pytest.approx((4.0 * 3 + 2.0 * 1) / 4, abs=1e-3)
-    assert result["overall"]["earned_credits"] == 4.0
+    assert result["overall"]["attempted_credits"] == 4.0
 
 
 def test_analyze_courses_handles_empty_input():
     result = analyze_courses([])
     assert result["per_semester"] == []
     assert result["overall"]["gpa"] is None
-    assert result["overall"]["earned_credits"] == 0.0
+    assert result["overall"]["attempted_credits"] == 0.0
     assert result["grade_map"]["A+"]["percent_range"] == [90, 100]
 
 
 def test_zero_credit_course_does_not_divide_by_zero():
     result = analyze_courses([{"semester": "113-1", "credits": "0", "grade": "A"}])
     assert result["per_semester"][0]["gpa"] is None
+
+
+def test_semesters_sort_numerically_across_the_roc_year_boundary():
+    """Regression: ROC year 99 must precede 100; a string sort puts it last."""
+    result = analyze_courses(
+        [
+            {"semester": "100-1", "credits": "3", "grade": "A"},
+            {"semester": "99-1", "credits": "3", "grade": "B"},
+            {"semester": "113-1", "credits": "3", "grade": "C"},
+        ]
+    )
+    assert [s["semester"] for s in result["per_semester"]] == ["99-1", "100-1", "113-1"]
+
+
+def test_semester_sort_key_handles_both_transcript_formats():
+    assert semester_sort_key("1131") < semester_sort_key("1141")
+    assert semester_sort_key("99-1") < semester_sort_key("100-1")
+    assert semester_sort_key("") == ()
+
+
+def test_credits_with_a_unit_suffix_are_still_counted():
+    result = analyze_courses([{"semester": "113-1", "credits": "3 學分", "grade": "A"}])
+    assert result["per_semester"][0]["attempted_credits"] == 3.0
+    assert result["per_semester"][0]["gpa"] == pytest.approx(4.0)
+
+
+def test_failing_grades_count_as_attempted_but_not_earned():
+    result = analyze_courses(
+        [
+            {"semester": "113-1", "credits": "3", "grade": "A"},
+            {"semester": "113-1", "credits": "3", "grade": "E"},
+        ]
+    )
+    overall = result["overall"]
+    assert overall["attempted_credits"] == 6.0
+    assert overall["earned_credits"] == 3.0
+    assert overall["gpa"] == pytest.approx(2.0)
