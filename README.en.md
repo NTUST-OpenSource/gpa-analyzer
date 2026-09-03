@@ -1,11 +1,11 @@
 <div align="center">
-
-# GPA Analyzer
+<a href="https://gpa.ntust.org">
+  <img width="2000" src=".github/assets/banner.png" alt="GPA Analyzer Banner"/>
+</a>
+<br>
 
 [![License](https://img.shields.io/github/license/NTUST-OpenSource/gpa-analyzer?style=for-the-badge)](LICENSE)
-[![Build](https://img.shields.io/github/actions/workflow/status/NTUST-OpenSource/gpa-analyzer/release.yml?branch=main&style=for-the-badge&label=Build)](https://github.com/NTUST-OpenSource/gpa-analyzer/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![GHCR](https://img.shields.io/badge/GHCR-Image-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/NTUST-OpenSource/gpa-analyzer/pkgs/container/gpa-analyzer)
 
 [繁體中文](README.md) | **English**
 
@@ -13,24 +13,23 @@
 
 ## Overview
 
-GPA Analyzer is a **self-hosted** transcript analyser for NTUST students.
+GPA Analyzer is a self-hosted grade visualisation and analysis tool
 
-The university's grade portal hands you a single table — no GPA, no trends, no grade distribution. This project signs in with your account, pulls your full transcript, and turns it into something you can actually read.
+Credentials are encrypted and stored in the user's browser; the server keeps no credentials
 
-### 📊 **Grade analysis**
-- Per-semester and overall **GPA**, credit-weighted, with A+ = 4.3
-- Attempted, earned, and in-progress credits at a glance
-- Pass/withdrawn/waived courses are automatically excluded from GPA
+### **Grade computation**
+- Per-semester / overall **GPA**
+- Attempted, earned, and in-progress credits
+- Second withdrawals / waived courses
 
-### 📈 **Interactive charts**
-- GPA trend line across semesters
-- Credits taken per semester
-- Stacked breakdown of credits by letter grade
+### **Interactive charts**
+- Per-semester GPA line chart
+- Stacked credits per letter grade, for the grade distribution
 
-### 🏅 **Rankings and courses**
-- Class and department rank, per semester and cumulative
+### **Rankings and courses**
+- Class, department, and cumulative rankings
 - Full course list with course ID, credits, grade, and general-education dimension
-- Layouts for phone, tablet, and desktop
+- Adapts to the window size
 
 <br/>
 
@@ -53,8 +52,7 @@ docker run -d --name gpa-analyzer \
 Images are published for `linux/amd64` and `linux/arm64`.
 
 > [!IMPORTANT]
-> `COOKIE_SECURE` defaults to `true`, so session cookies are only sent over HTTPS.
-> To test locally over `http://`, add `-e COOKIE_SECURE=false`. In production, run behind an HTTPS reverse proxy.
+> To test over unencrypted `http://`, add `-e COOKIE_SECURE=false`
 
 ### Docker Compose
 
@@ -90,46 +88,44 @@ uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_
 # Put the output in SECRET_KEY, and set COOKIE_SECURE=false for local HTTP testing
 
 uv sync
-./start.sh
+uv run python -m gpa_analyzer.app
 ```
 
-Open <http://localhost:20001> and sign in with your student ID and Moodle password.
+Open <http://localhost:8000> and sign in with your student ID and Moodle password.
 
 <br/>
 
 ## Configuration
 
-Everything is configured through environment variables, which may live in `.env` (see [`.env.example`](.env.example)).
+Everything is configured through environment variables, which may live in `.env` (see [`.env.example`](.env.example))
+
+Values are read with **shell environment > `.env`** precedence: anything already exported in the shell is never overwritten by `.env`
 
 | Variable | Default | Description |
 |---|---|---|
 | `SECRET_KEY` | none, **required** | Fernet key used to encrypt session cookies. The service refuses to start without it |
 | `COOKIE_SECURE` | `true` | Restrict session cookies to HTTPS. When true, the cookie also gets the `__Host-` prefix |
-| `HOST` / `PORT` | `0.0.0.0` / `8000` (`20001` via `start.sh`) | Listening address and port |
+| `HOST` / `PORT` | `0.0.0.0` / `8000` | Listening address and port |
 | `CACHE_DIR` | `.cache` (`/data` in the container) | Where the scraper stores its caches |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Which peers may set `X-Forwarded-For`. **Set this to your actual reverse proxy** |
 | `TRUSTED_ORIGINS` | empty | Extra hostnames accepted in `Origin`, comma separated. Only needed when a proxy rewrites `Host` |
 | `LOGIN_FAILURE_LIMIT` | `5` | Failed sign-ins allowed per account and per IP, per 5 minutes |
-| `LOGIN_ATTEMPT_LIMIT` | `120` | Sign-in attempts allowed per IP, per 5 minutes. Raise it when many students share one NAT address |
-| `API_RATE_LIMIT` | `30` | API requests allowed per IP, per 5 minutes |
-| `NTUST_USERNAME` / `NTUST_PASSWORD` | none | Used only by the `GpaAnalyzer.py` CLI. The web service never reads them |
+| `LOGIN_ATTEMPT_LIMIT` | `10` | Sign-in attempts allowed per IP, per 5 minutes |
+| `API_RATE_LIMIT` | `10` | API requests allowed per IP, per 5 minutes |
+| `NTUST_USERNAME` / `NTUST_PASSWORD` | none | Used only by the command line mode. The web service never reads them |
 
 > [!NOTE]
-> Only failed sign-ins count against `LOGIN_FAILURE_LIMIT`, so ordinary users are never locked out by signing in.
-> If your reverse proxy does not preserve the original `Host` header, every sign-in is rejected with 403 — set `TRUSTED_ORIGINS` in that case.
-
-> [!WARNING]
-> Leaking `SECRET_KEY` is equivalent to leaking every user's password. Keep it out of version control.
-> Rotating `SECRET_KEY` invalidates all existing sessions and forces users to sign in again.
+> If sign-ins are rejected with 403, the reverse proxy is probably not preserving the original `Host` header — set `TRUSTED_ORIGINS`
 
 ### Command line
 
 Print the analysis as JSON without starting the web service:
 
 ```bash
-uv run python GpaAnalyzer.py <student-id> <password>
-# or set NTUST_USERNAME / NTUST_PASSWORD in .env and run it bare
-uv run python GpaAnalyzer.py
+uv run python -m gpa_analyzer.analyzer <student-id> <password>
+
+# or set NTUST_USERNAME / NTUST_PASSWORD in .env
+uv run python -m gpa_analyzer.analyzer
 ```
 
 <br/>
@@ -142,16 +138,14 @@ This service handles university credentials. Here is how it treats them:
 |---|---|
 | **Credential storage** | Encrypted with Fernet (AES-128-CBC + HMAC) into a browser cookie; there is no server-side database. The cookie is `HttpOnly` + `SameSite=Strict` and expires after 7 days |
 | **Why the password is kept** | The grade portal offers no API and no long-lived token, so every query needs a fresh sign-in — the password has to be recoverable |
-| **TLS** | Connections to the university verify the full chain, expiry, and hostname. Only the strict RFC 5280 extension checks added in Python 3.13+ are relaxed, because an intermediate in the NTUST chain omits its Subject Key Identifier |
-| **Cookie cache** | Portal session cookies are cached for 30 minutes under `HMAC(SECRET_KEY, user:password)`, so a different password never hits the cache and a cache hit can never substitute for authentication |
-| **Brute force** | Failed sign-ins are capped at 5 per 5 minutes per IP and per account (successes are not counted); sign-in attempts at 120 per IP; the API at 30 requests per 5 minutes |
-| **XSS** | Strict CSP (`default-src 'none'`, no `unsafe-inline`), all front-end assets served locally with no CDN, and every value injected into the DOM is escaped |
+| **TLS** | Connections to the university verify the full chain, expiry, and hostname |
+| **Cookie cache** | The portal's session cookies are cached under a derived index for 30 minutes |
+| **Brute force** | Failed sign-ins capped at 5 per IP and per account / 5 minutes; sign-in attempts at 10 per IP / 5 minutes; the API at 10 / 5 minutes |
+| **XSS** | Strict CSP, no CDN |
 | **CSRF** | `SameSite=Strict` cookies, Origin checks on sign-in and sign-out, and sign-out accepts POST only |
 
 > [!CAUTION]
-> This is self-hosted software. Whoever operates an instance is technically able to read its users' passwords — only use an instance you trust.
-
-Please report security issues through a [GitHub Security Advisory](https://github.com/NTUST-OpenSource/gpa-analyzer/security/advisories/new) rather than a public issue.
+> Please report security issues through a [GitHub Security Advisory](https://github.com/NTUST-OpenSource/gpa-analyzer/security/advisories/new) rather than a public issue
 
 <br/>
 
@@ -172,21 +166,17 @@ npm install
 npm run build              # writes static/vendor/tailwind.css
 ```
 
-CI fails if `static/vendor/tailwind.css` is out of date, so don't skip the rebuild.
-
-> [!NOTE]
-> Dependabot only edits `package.json` and `package-lock.json`; it cannot regenerate the CSS.
-> When a Tailwind bump turns a pull request red, run `npm ci && npm run build` on that branch and commit the result.
+CI checks that `static/vendor/tailwind.css` is up to date
 
 ### Project layout
 
 ```
-app.py               FastAPI application: sign-in, sessions, API endpoints
-GpaAnalyzer.py       Scraper, HTML parsing, and GPA computation
-templates/           Jinja2 templates
-static/              Front-end assets (app.js and self-hosted vendor/)
-assets/tailwind.css  Tailwind source stylesheet
-tests/               pytest suite
+gpa_analyzer/app.py       FastAPI application: sign-in, sessions, API endpoints
+gpa_analyzer/analyzer.py  Scraper, HTML parsing, and GPA computation
+templates/                Jinja2 templates
+static/                   Front-end assets (app.js and self-hosted vendor/)
+assets/tailwind.css       Tailwind source stylesheet
+tests/                    pytest suite
 ```
 
 <br/>
@@ -195,12 +185,10 @@ tests/               pytest suite
 
 Copyright (C) 2026 NTUST-OpenSource contributors
 
-Licensed under the **GNU Affero General Public License v3.0 or later**. See [LICENSE](LICENSE) for the full text.
-
-The key AGPL obligation: if you modify this project and offer it to others over a network, you must offer those users your modified source code.
+Licensed under the **GNU Affero General Public License v3.0 or later**. See [LICENSE](LICENSE) for the full text
 
 <br/>
 
 ## Disclaimer
 
-This project is not officially affiliated with National Taiwan University of Science and Technology. Users are responsible for complying with their institution's acceptable-use policies.
+This project is not officially affiliated with National Taiwan University of Science and Technology. Users are responsible for complying with their institution's acceptable-use policies

@@ -1,11 +1,11 @@
 <div align="center">
-
-# GPA Analyzer
+<a href="https://gpa.ntust.org">
+  <img width="2000" src=".github/assets/banner.png" alt="GPA Analyzer Banner"/>
+</a>
+<br>
 
 [![License](https://img.shields.io/github/license/NTUST-OpenSource/gpa-analyzer?style=for-the-badge)](LICENSE)
-[![Build](https://img.shields.io/github/actions/workflow/status/NTUST-OpenSource/gpa-analyzer/release.yml?branch=main&style=for-the-badge&label=Build)](https://github.com/NTUST-OpenSource/gpa-analyzer/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![GHCR](https://img.shields.io/badge/GHCR-Image-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/NTUST-OpenSource/gpa-analyzer/pkgs/container/gpa-analyzer)
 
 **繁體中文** | [English](README.en.md)
 
@@ -13,24 +13,23 @@
 
 ## 總覽
 
-GPA Analyzer 是一套**自架**的臺科大成績分析工具。
+GPA Analyzer 是一個可以自行架設的成績可視化與分析工具
 
-學校的成績查詢系統只給你一張表格 — 沒有 GPA、沒有趨勢、沒有各等第的分佈。這個專案登入你的帳號、抓下歷年成績，然後把它變成看得懂的東西。
+帳號密碼由使用者瀏覽器加密儲存，伺服器不儲存帳號密碼
 
-### 📊 **成績分析**
-- 每學期 / 整體 **GPA**（學分加權，A+ = 4.3）
-- 修習學分、已實得學分、修習中學分一次看完
-- 通過 / 退選 / 抵免等非等第課程自動排除在 GPA 之外
+### **成績計算**
+- 每學期 / 整體 **GPA**
+- 修習學分、已實得學分、修習中學分
+- 二次退選 / 抵免
 
-### 📈 **互動式圖表**
-- 每學期 GPA 折線圖，一眼看出走勢
-- 每學期學分數長條圖
-- 各等第學分數堆疊圖，知道自己的成績分佈長什麼樣
+### **互動式圖表**
+- 每學期 GPA 折線圖
+- 各等第學分數堆疊圖，查看成績分佈
 
-### 🏅 **排名與課程**
-- 學期班排、系排與歷年累計排名
+### **排名與課程**
+- 班排、系排與歷年累計排名
 - 完整課程清單，含課號、學分、成績、通識向度
-- 手機、平板、桌機皆有對應版面
+- 自適應視窗大小
 
 <br/>
 
@@ -53,8 +52,7 @@ docker run -d --name gpa-analyzer \
 映像檔支援 `linux/amd64` 與 `linux/arm64`。
 
 > [!IMPORTANT]
-> 預設 `COOKIE_SECURE=true`，session cookie 只會透過 HTTPS 傳送。
-> 若要在本機用 `http://` 測試，請加上 `-e COOKIE_SECURE=false`；正式環境請放在 HTTPS 反向代理之後。
+> 若要使用非加密的 `http://` 測試，請加上 `-e COOKIE_SECURE=false`
 
 ### Docker Compose
 
@@ -90,46 +88,44 @@ uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_
 # 把輸出填進 .env 的 SECRET_KEY，本機測試再把 COOKIE_SECURE 設為 false
 
 uv sync
-./start.sh
+uv run python -m gpa_analyzer.app
 ```
 
-開啟 <http://localhost:20001>，用學號與 Moodle 密碼登入。
+開啟 <http://localhost:8000>，用學號與 Moodle 密碼登入。
 
 <br/>
 
 ## 設定
 
-所有設定都透過環境變數，可寫在 `.env`（參考 [`.env.example`](.env.example)）。
+所有設定都透過環境變數，可寫在 `.env`（參考 [`.env.example`](.env.example)）
 
-| 變數 | 預設值 | 說明 |
-|---|---|---|
-| `SECRET_KEY` | 無，**必填** | Fernet 金鑰，用來加密 session cookie。未設定時服務不會啟動 |
-| `COOKIE_SECURE` | `true` | session cookie 是否只走 HTTPS。設為 `true` 時 cookie 會加上 `__Host-` 前綴 |
-| `HOST` / `PORT` | `0.0.0.0` / `8000`（`start.sh` 為 `20001`） | 監聽位址與埠號 |
-| `CACHE_DIR` | `.cache`（容器內為 `/data`） | 爬蟲快取存放位置 |
-| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 信任 `X-Forwarded-For` 的來源 IP，**請填實際反向代理的位址** |
-| `TRUSTED_ORIGINS` | 空 | 額外接受的 Origin 主機名稱，以逗號分隔。僅在反向代理會改寫 `Host` 時需要 |
-| `LOGIN_FAILURE_LIMIT` | `5` | 每 5 分鐘、每帳號與每 IP 允許的登入失敗次數 |
-| `LOGIN_ATTEMPT_LIMIT` | `120` | 每 5 分鐘、每 IP 允許的登入嘗試次數。校內 NAT 使用者眾多時可調高 |
-| `API_RATE_LIMIT` | `30` | 每 5 分鐘、每 IP 允許的 API 請求次數 |
-| `NTUST_USERNAME` / `NTUST_PASSWORD` | 無 | 僅供 `GpaAnalyzer.py` 命令列使用，Web 服務不會讀取 |
+讀取優先序為 **shell 環境變數 > `.env`**，已在 shell 匯出的值不會被 `.env` 覆蓋
+
+| 變數 | 預設值                                      | 說明 |
+|---|---------------------------------------------|---|
+| `SECRET_KEY` | 無，**必填**                                | Fernet 金鑰，用來加密 session cookie。未設定時服務不會啟動 |
+| `COOKIE_SECURE` | `true`                                      | session cookie 是否只走 HTTPS。設為 `true` 時 cookie 會加上 `__Host-` 前綴 |
+| `HOST` / `PORT` | `0.0.0.0` / `8000`                          | 監聽位址與埠號 |
+| `CACHE_DIR` | `.cache`（容器內為 `/data`）                | 爬蟲快取存放位置 |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1`                                 | 信任 `X-Forwarded-For` 的來源 IP，**請填實際反向代理的位址** |
+| `TRUSTED_ORIGINS` | 空                                          | 額外接受的 Origin 主機名稱，以逗號分隔。僅在反向代理會改寫 `Host` 時需要 |
+| `LOGIN_FAILURE_LIMIT` | `5`                                         | 每 5 分鐘、每帳號與每 IP 允許的登入失敗次數 |
+| `LOGIN_ATTEMPT_LIMIT` | `10`                                        | 每 5 分鐘、每 IP 允許的登入嘗試次數 |
+| `API_RATE_LIMIT` | `10`                                        | 每 5 分鐘、每 IP 允許的 API 請求次數 |
+| `NTUST_USERNAME` / `NTUST_PASSWORD` | 無                                          | 僅供命令列模式使用，Web 服務不會讀取 |
 
 > [!NOTE]
-> 登入失敗才會計入 `LOGIN_FAILURE_LIMIT`，成功登入不佔額度，因此正常使用者不會被鎖住。
-> 若你的反向代理沒有保留原始 `Host` 標頭，登入會全部被擋成 403 — 這時請設定 `TRUSTED_ORIGINS`。
-
-> [!WARNING]
-> `SECRET_KEY` 外洩等同所有使用者的密碼外洩。請妥善保管，切勿提交進版控。
-> 更換 `SECRET_KEY` 會讓所有既有 session 失效，使用者需重新登入。
+> 若遇到登入會被 403 阻擋，可能是反向代理沒有保留原始 `Host` 標頭，請設定 `TRUSTED_ORIGINS`
 
 ### 命令列
 
 不啟動 Web 服務，直接輸出 JSON：
 
 ```bash
-uv run python GpaAnalyzer.py <學號> <密碼>
-# 或把帳密放進 .env 的 NTUST_USERNAME / NTUST_PASSWORD 後直接執行
-uv run python GpaAnalyzer.py
+uv run python -m gpa_analyzer.analyzer <學號> <密碼>
+
+# 在 .env 中設定 NTUST_USERNAME / NTUST_PASSWORD
+uv run python -m gpa_analyzer.analyzer
 ```
 
 <br/>
@@ -138,20 +134,18 @@ uv run python GpaAnalyzer.py
 
 這個服務會處理你的學校帳號密碼，設計上做了以下處理：
 
-| 項目 | 作法 |
-|---|---|
+| 項目 | 作法                                                                                                                                  |
+|---|---------------------------------------------------------------------------------------------------------------------------------------|
 | **憑證儲存** | 以 Fernet（AES-128-CBC + HMAC）加密後存在瀏覽器 cookie，伺服器不保存資料庫。cookie 為 `HttpOnly` + `SameSite=Strict`，預設 7 天後失效 |
-| **為何需要保存密碼** | 學校成績系統沒有 API 或長效 token，每次查詢都必須重新登入，因此密碼必須可還原 |
-| **TLS** | 對學校系統的連線會完整驗證憑證鏈、有效期限與主機名稱。僅關閉 Python 3.13+ 新增的嚴格 RFC 5280 擴充欄位檢查 — 學校憑證鏈中有一張中介憑證缺少 Subject Key Identifier |
-| **Cookie 快取** | 學校的 session cookie 會以 `HMAC(SECRET_KEY, 帳號:密碼)` 為索引快取 30 分鐘，密碼不同就不會命中，快取不能取代驗證 |
-| **暴力破解** | 登入失敗每 IP、每帳號各限 5 次 / 5 分鐘（成功不計）；登入嘗試每 IP 限 120 次 / 5 分鐘；API 限 30 次 / 5 分鐘 |
-| **XSS** | 嚴格 CSP（`default-src 'none'`、無 `unsafe-inline`），所有前端資源自架、無 CDN，注入 DOM 的資料一律逸出 |
-| **CSRF** | `SameSite=Strict` cookie，登入與登出皆檢查 Origin，登出只接受 POST |
+| **為何需要保存密碼** | 學校成績系統沒有 API 或長效 token，每次查詢都必須重新登入，因此密碼必須可還原                                                         |
+| **TLS** | 對學校系統的連線會完整驗證憑證鏈、有效期限與主機名稱                                                                                  |
+| **Cookie 快取** | 學校的 session cookie 索引快取 30 分鐘                                                                                                |
+| **暴力破解** | 登入失敗每 IP、每帳號各限 5 次 / 5 分鐘；登入嘗試每 IP 限 10 次 / 5 分鐘；API 限 10 次 / 5 分鐘                           |
+| **XSS** | 嚴格 CSP、無 CDN                                                                                                                      |
+| **CSRF** | `SameSite=Strict` cookie，登入與登出皆檢查 Origin，登出只接受 POST                                                                    |
 
 > [!CAUTION]
-> 這是自架服務。架設者在技術上有能力讀取使用者的密碼 — 請只使用你自己信任的站點。
-
-發現安全問題請透過 [GitHub Security Advisory](https://github.com/NTUST-OpenSource/gpa-analyzer/security/advisories/new) 回報，請勿開公開 issue。
+> 發現安全問題請透過 [GitHub Security Advisory](https://github.com/NTUST-OpenSource/gpa-analyzer/security/advisories/new) 回報，請勿開公開 issue
 
 <br/>
 
@@ -172,21 +166,17 @@ npm install
 npm run build              # 產出 static/vendor/tailwind.css
 ```
 
-CI 會檢查 `static/vendor/tailwind.css` 是否為最新，忘了重新建置會失敗。
-
-> [!NOTE]
-> Dependabot 只會改 `package.json` 與 `package-lock.json`，不會重新產生 CSS。
-> 若 Tailwind 升級的 PR 因此變紅，在該分支上跑 `npm ci && npm run build` 並提交結果即可。
+CI 會檢查 `static/vendor/tailwind.css` 是否為最新
 
 ### 專案結構
 
 ```
-app.py               FastAPI 應用：登入、session、API 端點
-GpaAnalyzer.py       爬蟲、HTML 解析與 GPA 計算
-templates/           Jinja2 樣板
-static/              前端資源（app.js 與自架的 vendor/）
-assets/tailwind.css  Tailwind 原始樣式
-tests/               pytest 測試
+gpa_analyzer/app.py       FastAPI 應用：登入、session、API 端點
+gpa_analyzer/analyzer.py  爬蟲、HTML 解析與 GPA 計算
+templates/                Jinja2 樣板
+static/                   前端資源（app.js 與自架的 vendor/）
+assets/tailwind.css       Tailwind 原始樣式
+tests/                    pytest 測試
 ```
 
 <br/>
@@ -195,12 +185,10 @@ tests/               pytest 測試
 
 Copyright (C) 2026 NTUST-OpenSource contributors
 
-本專案採用 **GNU Affero General Public License v3.0 或更新版本** 授權，完整條款見 [LICENSE](LICENSE)。
-
-AGPL 的重點：若你修改本專案並提供網路服務給他人使用，必須向使用者提供你修改後的原始碼。
+本專案採用 **GNU Affero General Public License v3.0 或更新版本** 授權，完整條款見 [LICENSE](LICENSE)
 
 <br/>
 
 ## 免責聲明
 
-本專案與國立臺灣科技大學無官方關聯。使用者需自行負責遵守學校的資訊系統使用規範。
+本專案與國立臺灣科技大學無官方關聯。使用者需自行負責遵守學校的資訊系統使用規範
