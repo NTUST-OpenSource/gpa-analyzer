@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/github/license/NTUST-OpenSource/gpa-analyzer?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 
-**繁體中文** | [English](README.en.md)
+ **繁體中文** | [English](README-en.md)
 
 </div>
 
