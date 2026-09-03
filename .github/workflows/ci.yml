@@ -2,6 +2,10 @@ name: CI
 
 on:
   pull_request:
+  # Re-check dev itself: a merged PR was tested against the dev tip it
+  # branched from, not against whatever landed there since.
+  push:
+    branches: [dev]
   workflow_call:
   workflow_dispatch:
 
