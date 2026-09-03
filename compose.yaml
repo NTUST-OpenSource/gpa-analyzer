@@ -3,29 +3,37 @@ services:
     image: ghcr.io/ntust-opensource/gpa-analyzer:latest
     container_name: gpa-analyzer
     restart: unless-stopped
+
     # The container always serves on 8000; PORT from .env only picks the
     # published port on the host.
     ports:
       - "${PORT:-8000}:8000"
+
     environment:
       # Fernet key used to encrypt session cookies. Required. Generate one with:
       #   docker run --rm ghcr.io/ntust-opensource/gpa-analyzer:latest \
       #     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
       SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+
       # Send session cookies only over HTTPS. Set false to test over http://.
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
+
       # Address of the reverse proxy in front of this service, so client IPs are
       # read from X-Forwarded-For.
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+
       # Extra hostnames accepted in the Origin header, comma separated. Only
       # needed when a proxy rewrites the Host header.
       TRUSTED_ORIGINS: ${TRUSTED_ORIGINS:-}
+
       # Rate limits, each counted over a 5 minute window.
       LOGIN_FAILURE_LIMIT: ${LOGIN_FAILURE_LIMIT:-5}
-      LOGIN_ATTEMPT_LIMIT: ${LOGIN_ATTEMPT_LIMIT:-120}
-      API_RATE_LIMIT: ${API_RATE_LIMIT:-30}
+      LOGIN_ATTEMPT_LIMIT: ${LOGIN_ATTEMPT_LIMIT:-10}
+      API_RATE_LIMIT: ${API_RATE_LIMIT:-10}
+
     volumes:
       - cache:/data
+
     security_opt:
       - no-new-privileges:true
 
