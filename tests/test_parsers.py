@@ -117,3 +117,21 @@ def test_credits_summary_anchors_on_a_th_label():
     """
     summary = NtustGradeScraper._parse_credits_summary(BeautifulSoup(html, "html.parser"))
     assert summary["earned_credits"]["total"] == "63"
+
+
+def test_student_info_skips_a_td_based_header_row():
+    html = """
+    <div class="box"><h2>基本資料</h2><table class="table">
+      <tr><td>學號</td><td>姓名</td><td>班級</td></tr>
+      <tr><td>B11234567</td><td>王小明</td><td>資工四A</td></tr>
+    </table></div>
+    """
+    info = NtustGradeScraper._parse_student_info(BeautifulSoup(html, "html.parser"))
+    assert info == {"student_id": "B11234567", "name": "王小明", "class_name": "資工四A"}
+
+
+def test_parse_credits_never_returns_a_negative():
+    from GpaAnalyzer import _parse_credits
+
+    assert _parse_credits("-2") == 2.0
+    assert _parse_credits("(3)") == 3.0

@@ -193,6 +193,8 @@ tests/               pytest 測試
 
 ## 授權
 
+Copyright (C) 2026 NTUST-OpenSource contributors
+
 本專案採用 **GNU Affero General Public License v3.0 或更新版本** 授權，完整條款見 [LICENSE](LICENSE)。
 
 AGPL 的重點：若你修改本專案並提供網路服務給他人使用，必須向使用者提供你修改後的原始碼。

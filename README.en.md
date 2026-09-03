@@ -193,6 +193,8 @@ tests/               pytest suite
 
 ## License
 
+Copyright (C) 2026 NTUST-OpenSource contributors
+
 Licensed under the **GNU Affero General Public License v3.0 or later**. See [LICENSE](LICENSE) for the full text.
 
 The key AGPL obligation: if you modify this project and offer it to others over a network, you must offer those users your modified source code.

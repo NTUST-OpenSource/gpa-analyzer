@@ -324,15 +324,15 @@ class NtustGradeScraper:
         header = soup.find(lambda tag: tag.name == "h2" and "基本資料" in tag.get_text())
         if not header or not (box := header.find_parent("div", class_="box")):
             return {}
-        if not (table := box.find("table", class_="table")) or not (tbody := table.find("tbody")):
-            return {}
-        if not (row := tbody.find("tr")):
+        if not (table := box.find("table", class_="table")):
             return {}
 
-        cols = [c.get_text(strip=True) for c in row.find_all("td")]
-        if len(cols) < 3:
-            return {}
-        return {"student_id": cols[0], "name": cols[1], "class_name": cols[2]}
+        for row in (table.find("tbody") or table).find_all("tr"):
+            cols = [c.get_text(strip=True) for c in row.find_all("td")]
+            if len(cols) < 3 or cols[0] in ("學號", "姓名"):
+                continue
+            return {"student_id": cols[0], "name": cols[1], "class_name": cols[2]}
+        return {}
 
     @staticmethod
     def _parse_courses(soup: BeautifulSoup) -> list:
