@@ -106,7 +106,15 @@ Everything is configured through environment variables, which may live in `.env`
 | `PORT` | `8000` (`20001` via `start.sh`) | Listening port |
 | `CACHE_DIR` | `.cache` (`/data` in the container) | Where the scraper stores its caches |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Which peers may set `X-Forwarded-For`. **Set this to your actual reverse proxy** |
+| `TRUSTED_ORIGINS` | empty | Extra hostnames accepted in `Origin`, comma separated. Only needed when a proxy rewrites `Host` |
+| `LOGIN_FAILURE_LIMIT` | `5` | Failed sign-ins allowed per account and per IP, per 5 minutes |
+| `LOGIN_ATTEMPT_LIMIT` | `120` | Sign-in attempts allowed per IP, per 5 minutes. Raise it when many students share one NAT address |
+| `API_RATE_LIMIT` | `30` | API requests allowed per IP, per 5 minutes |
 | `NTUST_USERNAME` / `NTUST_PASSWORD` | none | Used only by the `GpaAnalyzer.py` CLI. The web service never reads them |
+
+> [!NOTE]
+> Only failed sign-ins count against `LOGIN_FAILURE_LIMIT`, so ordinary users are never locked out by signing in.
+> If your reverse proxy does not preserve the original `Host` header, every sign-in is rejected with 403 — set `TRUSTED_ORIGINS` in that case.
 
 > [!WARNING]
 > Leaking `SECRET_KEY` is equivalent to leaking every user's password. Keep it out of version control.
@@ -134,7 +142,7 @@ This service handles university credentials. Here is how it treats them:
 | **Why the password is kept** | The grade portal offers no API and no long-lived token, so every query needs a fresh sign-in — the password has to be recoverable |
 | **TLS** | Connections to the university verify the full chain, expiry, and hostname. Only the strict RFC 5280 extension checks added in Python 3.13+ are relaxed, because an intermediate in the NTUST chain omits its Subject Key Identifier |
 | **Cookie cache** | Portal session cookies are cached for 30 minutes under `HMAC(SECRET_KEY, user:password)`, so a different password never hits the cache and a cache hit can never substitute for authentication |
-| **Brute force** | Sign-in is limited to 5 attempts per 5 minutes per IP and per account; the API is limited to 30 requests per 5 minutes |
+| **Brute force** | Failed sign-ins are capped at 5 per 5 minutes per IP and per account (successes are not counted); sign-in attempts at 120 per IP; the API at 30 requests per 5 minutes |
 | **XSS** | Strict CSP (`default-src 'none'`, no `unsafe-inline`), all front-end assets served locally with no CDN, and every value injected into the DOM is escaped |
 | **CSRF** | `SameSite=Strict` cookies, Origin checks on sign-in and sign-out, and sign-out accepts POST only |
 

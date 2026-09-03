@@ -19,13 +19,17 @@ from bs4 import BeautifulSoup
 logger = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parent
-CACHE_DIR = Path(os.getenv("CACHE_DIR") or (ROOT / ".cache"))
 
 COOKIE_CACHE_TTL = 30 * 60
 STUDENT_INFO_TTL = 7 * 24 * 60 * 60
 
 _cache_lock = threading.Lock()
 _fallback_secret = secrets.token_bytes(32)
+
+
+def cache_path(name: str) -> Path:
+    """Resolved per call so CACHE_DIR stays configurable regardless of import order."""
+    return Path(os.getenv("CACHE_DIR") or (ROOT / ".cache")) / name
 
 
 @cache
@@ -48,8 +52,15 @@ def _cache_secret() -> bytes:
     return configured.encode("utf-8") if configured else _fallback_secret
 
 
+def _prune_expired(cache: dict, ttl: int) -> dict:
+    now = time.time()
+    return {
+        k: v for k, v in cache.items() if isinstance(v, dict) and now - v.get("timestamp", 0) < ttl
+    }
+
+
 def _write_json_atomic(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -74,8 +85,8 @@ def _read_json(path: Path) -> dict:
 
 
 class NtustGradeScraper:
-    COOKIE_CACHE_FILE = CACHE_DIR / "cookie_cache.json"
-    STUDENT_INFO_FILE = CACHE_DIR / "student_info_cache.json"
+    COOKIE_CACHE_NAME: ClassVar[str] = "cookie_cache.json"
+    STUDENT_INFO_NAME: ClassVar[str] = "student_info_cache.json"
 
     REQUIRED_COOKIES: ClassVar[tuple[str, ...]] = (
         "StuScoreQueryServ",
@@ -111,15 +122,23 @@ class NtustGradeScraper:
         )
 
     @property
+    def _cookie_cache_file(self) -> Path:
+        return cache_path(self.COOKIE_CACHE_NAME)
+
+    @property
+    def _student_info_file(self) -> Path:
+        return cache_path(self.STUDENT_INFO_NAME)
+
+    @property
     def _cache_key(self) -> str:
         """Binds cached cookies to the exact credential pair, not just the username."""
-        material = f"{self.username}:{self.password}".encode()
+        material = b"gpa-analyzer/cookie-cache\x00" + f"{self.username}:{self.password}".encode()
         return hmac.new(_cache_secret(), material, hashlib.sha256).hexdigest()
 
     def _load_cached_cookies(self) -> bool:
         key = self._cache_key
         with _cache_lock:
-            entry = _read_json(self.COOKIE_CACHE_FILE).get(key)
+            entry = _read_json(self._cookie_cache_file).get(key)
         if not isinstance(entry, dict):
             return False
         if time.time() - entry.get("timestamp", 0) >= COOKIE_CACHE_TTL:
@@ -139,16 +158,18 @@ class NtustGradeScraper:
         }
         if not cookies:
             return
+        path = self._cookie_cache_file
         with _cache_lock:
-            cache = _read_json(self.COOKIE_CACHE_FILE)
+            cache = _prune_expired(_read_json(path), COOKIE_CACHE_TTL)
             cache[self._cache_key] = {"timestamp": time.time(), "cookies": cookies}
-            _write_json_atomic(self.COOKIE_CACHE_FILE, cache)
+            _write_json_atomic(path, cache)
 
     def _drop_cached_cookies(self) -> None:
+        path = self._cookie_cache_file
         with _cache_lock:
-            cache = _read_json(self.COOKIE_CACHE_FILE)
+            cache = _read_json(path)
             if cache.pop(self._cache_key, None) is not None:
-                _write_json_atomic(self.COOKIE_CACHE_FILE, cache)
+                _write_json_atomic(path, _prune_expired(cache, COOKIE_CACHE_TTL))
 
     def login(self) -> bool:
         if self._load_cached_cookies():
@@ -159,11 +180,11 @@ class NtustGradeScraper:
         try:
             r_init = self.client.get(self.URLS["entry"])
 
+            # Cookies were just cleared, so anything but an SSO challenge means the
+            # portal never verified this password. A session cookie alone is not proof.
             if self.SSO_HOST not in str(r_init.url):
-                if "StuScoreQueryServ" not in self.client.cookies:
-                    return False
-                self._store_cookies()
-                return True
+                logger.warning("Entry point did not redirect to SSO; refusing to authenticate")
+                return False
 
             form = BeautifulSoup(r_init.text, "html.parser").find("form", id="loginForm")
             if not form:
@@ -204,8 +225,9 @@ class NtustGradeScraper:
 
     def _get_student_info(self) -> dict:
         now = time.time()
+        path = self._student_info_file
         with _cache_lock:
-            cache = _read_json(self.STUDENT_INFO_FILE)
+            cache = _read_json(path)
         entry = cache.get(self.username)
         if isinstance(entry, dict) and now - entry.get("timestamp", 0) < STUDENT_INFO_TTL:
             return entry.get("data", {})
@@ -226,9 +248,9 @@ class NtustGradeScraper:
 
         if info:
             with _cache_lock:
-                cache = _read_json(self.STUDENT_INFO_FILE)
+                cache = _prune_expired(_read_json(path), STUDENT_INFO_TTL)
                 cache[self.username] = {"timestamp": now, "data": info}
-                _write_json_atomic(self.STUDENT_INFO_FILE, cache)
+                _write_json_atomic(path, cache)
         return info
 
     def fetch_grades(self) -> dict:

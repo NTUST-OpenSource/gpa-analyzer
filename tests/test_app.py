@@ -13,7 +13,8 @@ GRADE_DATA = {
 
 @pytest.fixture(autouse=True)
 def reset_limiters():
-    web.login_limiter = web.RateLimiter(*web.LOGIN_RATE)
+    web.login_failures = web.RateLimiter(*web.LOGIN_FAILURE_RATE)
+    web.login_attempts = web.RateLimiter(*web.LOGIN_ATTEMPT_RATE)
     web.api_limiter = web.RateLimiter(*web.API_RATE)
 
 
@@ -73,12 +74,34 @@ def test_login_upstream_failure_returns_502(client, monkeypatch):
     assert client.post("/login", data={"username": "u", "password": "p"}).status_code == 502
 
 
-def test_login_is_rate_limited(client, monkeypatch):
+def test_repeated_login_failures_are_rate_limited(client, monkeypatch):
     monkeypatch.setattr(web, "_verify_credentials", lambda u, p: False)
-    for _ in range(web.LOGIN_RATE[0]):
+    for _ in range(web.LOGIN_FAILURE_RATE[0]):
         client.post("/login", data={"username": "B11234567", "password": "bad"})
     r = client.post("/login", data={"username": "B11234567", "password": "bad"})
     assert r.status_code == 429
+
+
+def test_successful_logins_do_not_consume_the_failure_budget(client, monkeypatch):
+    """A shared campus NAT must not lock students out after a handful of sign-ins."""
+    monkeypatch.setattr(web, "_verify_credentials", lambda u, p: True)
+    for _ in range(web.LOGIN_FAILURE_RATE[0] + 3):
+        r = client.post(
+            "/login", data={"username": "B11234567", "password": "pw"}, follow_redirects=False
+        )
+        assert r.status_code == 302
+
+
+def test_login_accepts_a_trusted_origin_behind_a_rewriting_proxy(client, monkeypatch):
+    monkeypatch.setattr(web, "TRUSTED_ORIGINS", {"gpa.example.edu"})
+    monkeypatch.setattr(web, "_verify_credentials", lambda u, p: True)
+    r = client.post(
+        "/login",
+        data={"username": "B11234567", "password": "pw"},
+        headers={"origin": "https://gpa.example.edu"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
 
 
 def test_login_rejects_cross_origin_post(client):
@@ -122,6 +145,26 @@ def test_api_hides_internal_errors(authed_client, monkeypatch):
     r = authed_client.get("/api/grade-data")
     assert r.status_code == 500
     assert "secret internal detail" not in r.text
+
+
+def test_api_returns_empty_analysis_for_a_student_with_no_grades(authed_client, monkeypatch):
+    monkeypatch.setattr(
+        web,
+        "_fetch_grade_data",
+        lambda u, p: {"courses": [], "rankings": [], "credits_summary": {}, "student_info": {}},
+    )
+    r = authed_client.get("/api/grade-data")
+    assert r.status_code == 200
+    assert r.json()["analysis"]["overall"]["gpa"] is None
+
+
+def test_authenticated_responses_are_not_cached(authed_client, monkeypatch):
+    monkeypatch.setattr(web, "_fetch_grade_data", lambda u, p: dict(GRADE_DATA))
+    assert authed_client.get("/api/grade-data").headers["cache-control"] == "no-store"
+
+
+def test_csp_allows_the_web_manifest(client):
+    assert "manifest-src 'self'" in client.get("/login").headers["content-security-policy"]
 
 
 def test_api_is_rate_limited(authed_client, monkeypatch):

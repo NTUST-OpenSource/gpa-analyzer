@@ -27,13 +27,32 @@ COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").strip().lower() not in {"0", 
 SESSION_COOKIE = "__Host-gpaa_session" if COOKIE_SECURE else "gpaa_session"
 SESSION_MAX_AGE = 7 * 24 * 60 * 60
 
-LOGIN_RATE = (5, 300)
-API_RATE = (30, 300)
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ[name]))
+    except KeyError, ValueError:
+        return default
+
+
+RATE_WINDOW = 300
+
+# Failures are what indicate brute force, so only those are counted per account.
+# Attempts are capped separately and generously, because a campus NAT puts many
+# legitimate students behind a single address.
+LOGIN_FAILURE_RATE = (_int_env("LOGIN_FAILURE_LIMIT", 5), RATE_WINDOW)
+LOGIN_ATTEMPT_RATE = (_int_env("LOGIN_ATTEMPT_LIMIT", 120), RATE_WINDOW)
+API_RATE = (_int_env("API_RATE_LIMIT", 30), RATE_WINDOW)
+
+# Hosts accepted on top of the Host header, for proxies that rewrite it.
+TRUSTED_ORIGINS = {
+    h.strip().lower() for h in os.getenv("TRUSTED_ORIGINS", "").split(",") if h.strip()
+}
 
 CSP = (
     "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    "font-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; "
-    "frame-ancestors 'none'"
+    "font-src 'self'; connect-src 'self'; manifest-src 'self'; form-action 'self'; "
+    "base-uri 'none'; frame-ancestors 'none'"
 )
 
 
@@ -77,25 +96,42 @@ class RateLimiter:
         self._hits: defaultdict[str, deque[float]] = defaultdict(deque)
         self._lock = Lock()
 
+    def check(self, key: str) -> bool:
+        """Reports whether the key is under its limit without consuming budget."""
+        with self._lock:
+            return len(self._fresh(key, time.monotonic())) < self._limit
+
+    def record(self, key: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            if len(self._hits) > 10_000:
+                self._prune(now)
+            self._fresh(key, now).append(now)
+
     def allow(self, key: str) -> bool:
         now = time.monotonic()
         with self._lock:
             if len(self._hits) > 10_000:
                 self._prune(now)
-            hits = self._hits[key]
-            while hits and now - hits[0] > self._window:
-                hits.popleft()
+            hits = self._fresh(key, now)
             if len(hits) >= self._limit:
                 return False
             hits.append(now)
             return True
+
+    def _fresh(self, key: str, now: float) -> deque[float]:
+        hits = self._hits[key]
+        while hits and now - hits[0] > self._window:
+            hits.popleft()
+        return hits
 
     def _prune(self, now: float) -> None:
         for key in [k for k, v in self._hits.items() if not v or now - v[-1] > self._window]:
             del self._hits[key]
 
 
-login_limiter = RateLimiter(*LOGIN_RATE)
+login_failures = RateLimiter(*LOGIN_FAILURE_RATE)
+login_attempts = RateLimiter(*LOGIN_ATTEMPT_RATE)
 api_limiter = RateLimiter(*API_RATE)
 
 
@@ -105,12 +141,14 @@ def _client_key(request: Request) -> str:
 
 def _require_same_origin(request: Request) -> None:
     """Rejects cross-site form posts; SameSite cookies alone do not cover login CSRF."""
-    origin = request.headers.get("origin")
-    source = origin or request.headers.get("referer")
+    source = request.headers.get("origin") or request.headers.get("referer")
     if not source:
         return
-    host = urlsplit(source).netloc
-    if host and host != request.headers.get("host"):
+    host = urlsplit(source).netloc.lower()
+    if not host:
+        return
+    allowed = {(request.headers.get("host") or "").lower()} | TRUSTED_ORIGINS
+    if host not in allowed:
         raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
 
 
@@ -123,6 +161,8 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
+    if not request.url.path.startswith("/static"):
+        response.headers.setdefault("Cache-Control", "no-store")
     if COOKIE_SECURE:
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
@@ -180,8 +220,15 @@ async def login_page(request: Request):
 async def do_login(request: Request, username: str = Form(...), password: str = Form(...)):
     _require_same_origin(request)
 
+    client = _client_key(request)
     user_key = hashlib.sha256(username.encode("utf-8")).hexdigest()
-    if not login_limiter.allow(_client_key(request)) or not login_limiter.allow(user_key):
+
+    throttled = (
+        not login_attempts.allow(client)
+        or not login_failures.check(client)
+        or not login_failures.check(user_key)
+    )
+    if throttled:
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -198,6 +245,8 @@ async def do_login(request: Request, username: str = Form(...), password: str = 
         )
 
     if not authenticated:
+        login_failures.record(client)
+        login_failures.record(user_key)
         return templates.TemplateResponse(
             request,
             "login.html",
@@ -236,8 +285,8 @@ def _fetch_grade_data(username: str, password: str) -> dict:
             )
 
         grade_data = scraper.fetch_grades()
-        if grade_data.get("error") or not grade_data.get("courses"):
-            logger.warning("Grade fetch unsuccessful: %s", grade_data.get("error", "no_courses"))
+        if error := grade_data.get("error"):
+            logger.warning("Grade fetch unsuccessful: %s", error)
             raise HTTPException(
                 status_code=502, detail="Could not retrieve grades from the school system."
             )

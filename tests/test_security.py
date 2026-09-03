@@ -1,3 +1,5 @@
+import json
+import stat
 import time
 
 import pytest
@@ -9,7 +11,7 @@ from GpaAnalyzer import NtustGradeScraper
 
 @pytest.fixture
 def scraper_factory(tmp_path, monkeypatch):
-    monkeypatch.setattr(NtustGradeScraper, "COOKIE_CACHE_FILE", tmp_path / "cookies.json")
+    monkeypatch.setenv("CACHE_DIR", str(tmp_path))
     created = []
 
     def make(username, password):
@@ -98,3 +100,40 @@ def test_rate_limiter_blocks_after_limit():
     assert limiter.allow("k") is True
     assert limiter.allow("k") is False
     assert limiter.allow("other") is True
+
+
+def test_rate_limiter_check_does_not_consume_budget():
+    limiter = web.RateLimiter(limit=1, window=300)
+    assert limiter.check("k") is True
+    assert limiter.check("k") is True
+    limiter.record("k")
+    assert limiter.check("k") is False
+
+
+def test_cache_dir_is_read_at_call_time(tmp_path, monkeypatch):
+    """Regression: CACHE_DIR must apply even though the module imports before .env loads."""
+    monkeypatch.setenv("CACHE_DIR", str(tmp_path))
+    assert gpa.cache_path("cookie_cache.json") == tmp_path / "cookie_cache.json"
+
+
+def test_cache_file_is_owner_only(scraper_factory):
+    s = scraper_factory("B11234567", "pw")
+    s.client.cookies.set("StuScoreQueryServ", "v")
+    s._store_cookies()
+    assert stat.S_IMODE(s._cookie_cache_file.stat().st_mode) == 0o600
+
+
+def test_expired_entries_are_pruned_on_write(scraper_factory, monkeypatch):
+    stale = scraper_factory("old-user", "pw")
+    stale.client.cookies.set("StuScoreQueryServ", "v")
+    stale._store_cookies()
+
+    real_time = time.time()
+    monkeypatch.setattr(time, "time", lambda: real_time + 2 * gpa.COOKIE_CACHE_TTL)
+
+    fresh = scraper_factory("new-user", "pw")
+    fresh.client.cookies.set("StuScoreQueryServ", "v")
+    fresh._store_cookies()
+
+    with open(fresh._cookie_cache_file, encoding="utf-8") as f:
+        assert len(json.load(f)) == 1

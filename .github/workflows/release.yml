@@ -15,7 +15,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   publish:
@@ -28,6 +27,13 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
+
+      # GHCR rejects uppercase paths, and github.repository preserves the org's casing.
+      - name: Resolve image name
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+        run: echo "name=${REGISTRY}/${REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-qemu-action@v3
 
@@ -44,7 +50,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ steps.image.outputs.name }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -73,6 +79,6 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
