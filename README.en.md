@@ -3,7 +3,7 @@
 # GPA Analyzer
 
 [![License](https://img.shields.io/github/license/NTUST-OpenSource/gpa-analyzer?style=for-the-badge)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/NTUST-OpenSource/gpa-analyzer/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/NTUST-OpenSource/gpa-analyzer/actions/workflows/ci.yml)
+[![Build](https://img.shields.io/github/actions/workflow/status/NTUST-OpenSource/gpa-analyzer/release.yml?branch=main&style=for-the-badge&label=Build)](https://github.com/NTUST-OpenSource/gpa-analyzer/actions/workflows/release.yml)
 [![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![GHCR](https://img.shields.io/badge/GHCR-Image-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/NTUST-OpenSource/gpa-analyzer/pkgs/container/gpa-analyzer)
 
