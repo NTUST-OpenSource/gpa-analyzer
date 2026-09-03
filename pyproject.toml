@@ -1,0 +1,45 @@
+[project]
+name = "gpa-analyzer"
+version = "0.1.0"
+description = "Self-hosted web app that fetches NTUST transcripts and analyses GPA per semester."
+readme = "README.md"
+requires-python = ">=3.14"
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "certifi>=2026.7.22",
+    "cryptography>=50.0.1",
+    "fastapi>=0.141.1",
+    "httpx[http2]>=0.28.1",
+    "jinja2>=3.1.6",
+    "python-dotenv>=1.2.3",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.52.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/NTUST-OpenSource/gpa-analyzer"
+Source = "https://github.com/NTUST-OpenSource/gpa-analyzer"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+    "pytest-asyncio>=1.2.0",
+    "ruff>=0.14.2",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "S", "C4", "SIM", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

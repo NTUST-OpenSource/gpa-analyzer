@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GPA Analyzer - 登入</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', path='apple-touch-icon.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', path='favicon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', path='favicon-16x16.png') }}">
+    <link rel="manifest" href="{{ url_for('static', path='site.webmanifest') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', path='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind.css') }}">
+</head>
+<body class="min-h-screen bg-gray-50 flex items-center justify-center">
+<div class="w-full max-w-md bg-white shadow-lg rounded-xl p-8">
+    <h1 class="text-2xl font-bold text-gray-800 mb-6 text-center">GPA Analyzer</h1>
+    {% if error %}
+    <div class="mb-4 rounded-md bg-red-50 p-4">
+        <h2 class="text-sm font-medium text-red-800">{{ error }}</h2>
+    </div>
+    {% endif %}
+    <form method="post" action="/login" class="space-y-4">
+        <div>
+            <label for="username" class="block text-sm font-medium text-gray-700">學號</label>
+            <input id="username" name="username" type="text" required autocomplete="username"
+                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"/>
+        </div>
+        <div>
+            <label for="password" class="block text-sm font-medium text-gray-700">Moodle 密碼</label>
+            <input id="password" name="password" type="password" required autocomplete="current-password"
+                   class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"/>
+        </div>
+        <button type="submit"
+                class="w-full inline-flex justify-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-600">
+            登入
+        </button>
+    </form>
+    <p class="mt-6 text-xs text-gray-500 text-center">登入憑證僅加密儲存在本機 Cookie，作為查詢成績之用</p>
+</div>
+</body>
+</html>

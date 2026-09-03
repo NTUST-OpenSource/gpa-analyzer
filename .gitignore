@@ -1,0 +1,32 @@
+# Secrets
+.env
+.env.local
+
+# Runtime caches written by the scraper
+cookie_cache.json
+student_info_cache.json
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors
+.idea/
+*.iml
+.vscode/
+.duckversions/
+
+# OS
+.DS_Store
+
+# Node (front-end asset build only)
+node_modules/

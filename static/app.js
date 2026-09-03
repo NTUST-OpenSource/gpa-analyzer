@@ -1,0 +1,254 @@
+const GRADE_ORDER = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D', 'E', 'X'];
+
+const GRADE_COLORS = {
+    'A+': '#2ca02c', 'A': '#98df8a', 'A-': '#56b456',
+    'B+': '#1f77b4', 'B': '#aec7e8', 'B-': '#4a9fd8',
+    'C+': '#ff7f0e', 'C': '#ffbb78', 'C-': '#ff9f49',
+    'D': '#d62728', 'E': '#ff9896', 'X': '#9467bd'
+};
+
+const fmtGpa = (v) => (v === null || v === undefined) ? '—' : Number(v).toFixed(2);
+
+const color = (letter, alpha = 1.0) => GRADE_COLORS[letter]
+    ? `${GRADE_COLORS[letter]}${Math.floor(alpha * 255).toString(16).padStart(2, '0')}`
+    : '#888888';
+
+const esc = (v) => (v === null || v === undefined) ? '' : String(v).replace(
+    /[&<>"']/g,
+    (ch) => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch])
+);
+
+function renderLegend(containerId, gradeMap) {
+    const rows = GRADE_ORDER.map((letter) => {
+        const row = gradeMap[letter];
+        if (!row) return '';
+        const [low, high] = row.percent_range || [null, null];
+        const range = (low === null || high === null) ? '—' : `${esc(low)}-${esc(high)}`;
+        return `
+            <tr class="border-t border-gray-100">
+                <td class="py-1 pr-2 font-medium text-gray-900 flex items-center">
+                    <span class="inline-block w-3 h-3 mr-2 rounded-sm" style="background-color: ${esc(color(letter))}"></span>
+                    ${esc(letter)}
+                </td>
+                <td class="py-1 pr-2 text-gray-700">${esc(row.gpa)}</td>
+                <td class="py-1 text-gray-500">${range}</td>
+            </tr>
+        `;
+    }).join('');
+
+    const container = document.getElementById(containerId);
+    container.replaceChildren();
+    const table = document.createElement('table');
+    table.className = 'min-w-full';
+    table.innerHTML = `<tbody>${rows}</tbody>`;
+    container.appendChild(table);
+}
+
+function renderStudentInfo(info) {
+    if (!info || !info.student_id) return;
+    const headerInfo = document.getElementById('headerStudentInfo');
+    headerInfo.classList.remove('hidden');
+    headerInfo.classList.add('flex');
+    document.getElementById('headerName').textContent = info.name || '';
+    document.getElementById('headerId').textContent = info.student_id;
+    document.getElementById('headerClass').textContent = info.class_name || '';
+}
+
+function renderCreditsSummary(summary) {
+    const summaryDiv = document.getElementById('creditsSummary');
+    if (!summary || !summary.earned_credits) {
+        summaryDiv.innerHTML = `<p class="text-gray-500">無學分統計資料</p>`;
+        return;
+    }
+    const earned = summary.earned_credits.total || 0;
+    const inProgress = (summary.in_progress_credits || {}).total || 0;
+    const total = (summary.total_credits || {}).total || 0;
+    document.getElementById('overallCredits').textContent = total;
+    summaryDiv.innerHTML = `
+        <p><strong>已實得學分數:</strong> ${esc(earned)}</p>
+        <p><strong>修習中學分數:</strong> ${esc(inProgress)}</p>
+        <p><strong>合計學分數:</strong> ${esc(total)}</p>
+    `;
+}
+
+function renderRankings(rankings) {
+    const rankingBody = document.getElementById('rankingBody');
+    const rankingCards = document.getElementById('rankingCards');
+    rankingBody.replaceChildren();
+    rankingCards.replaceChildren();
+
+    if (!rankings || rankings.length === 0) {
+        rankingBody.innerHTML = `<tr><td colspan="5" class="px-3 py-4 text-center text-gray-500">無排名資料</td></tr>`;
+        rankingCards.innerHTML = `<p class="text-center text-gray-500 py-4">無排名資料</p>`;
+        return;
+    }
+
+    for (const r of rankings) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="px-3 py-2 text-gray-700">${esc(r.semester)}</td>
+            <td class="px-3 py-2 text-gray-700">${esc(r.class_rank)}</td>
+            <td class="px-3 py-2 text-gray-700">${esc(r.department_rank)}</td>
+            <td class="px-3 py-2 text-gray-700">${esc(r.cumulative_class_rank)}</td>
+            <td class="px-3 py-2 text-gray-700">${esc(r.cumulative_department_rank)}</td>
+        `;
+        rankingBody.appendChild(tr);
+
+        const card = document.createElement('div');
+        card.className = 'bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm space-y-1';
+        card.innerHTML = `
+            <div class="flex justify-between font-bold text-gray-900 border-b pb-1 mb-1">
+                <span>${esc(r.semester)}</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div><span class="text-gray-500">班排:</span> ${esc(r.class_rank)}</div>
+                <div><span class="text-gray-500">系排:</span> ${esc(r.department_rank)}</div>
+                <div><span class="text-gray-500">歷年班排:</span> ${esc(r.cumulative_class_rank)}</div>
+                <div><span class="text-gray-500">歷年系排:</span> ${esc(r.cumulative_department_rank)}</div>
+            </div>
+        `;
+        rankingCards.appendChild(card);
+    }
+}
+
+function renderCourses(courses) {
+    const tbody = document.getElementById('courseBody');
+    const courseCards = document.getElementById('courseCards');
+    tbody.replaceChildren();
+    courseCards.replaceChildren();
+
+    const sorted = [...(courses || [])].sort((a, b) =>
+        (b.semester || '').localeCompare(a.semester || '') ||
+        (a.course_id || '').localeCompare(b.course_id || '')
+    );
+
+    for (const c of sorted) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td class="px-3 py-2 text-gray-700">${esc(c.semester)}</td>
+            <td class="px-3 py-2 text-gray-700">${esc(c.course_id)}</td>
+            <td class="px-3 py-2 text-gray-900 font-medium">${esc(c.course_name)}</td>
+            <td class="px-3 py-2 tabular-nums">${esc(c.credits)}</td>
+            <td class="px-3 py-2">${esc(c.grade)}</td>
+            <td class="px-3 py-2 text-gray-700">${esc(c.dimension || '-')}</td>
+        `;
+        tbody.appendChild(tr);
+
+        const card = document.createElement('div');
+        card.className = 'bg-gray-50 p-4 rounded-lg border border-gray-100 space-y-2';
+        card.innerHTML = `
+            <div class="flex justify-between items-start">
+                <div>
+                    <div class="text-[10px] text-gray-500">${esc(c.semester)} | ${esc(c.course_id)}</div>
+                    <div class="font-bold text-gray-900 text-sm">${esc(c.course_name)}</div>
+                </div>
+                <div class="text-base font-bold text-indigo-600 ml-2">${esc(c.grade)}</div>
+            </div>
+            <div class="flex justify-between text-xs text-gray-600 border-t pt-2 mt-1">
+                <span>學分: ${esc(c.credits)}</span>
+                <span>向度: ${esc(c.dimension || '-')}</span>
+            </div>
+        `;
+        courseCards.appendChild(card);
+    }
+}
+
+function renderCharts(analysis, semesters) {
+    new Chart(document.getElementById('gpaChart'), {
+        type: 'line',
+        data: {
+            labels: semesters,
+            datasets: [{
+                label: '平均 GPA',
+                data: analysis.per_semester.map((s) => s.gpa),
+                borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,0.1)',
+                tension: 0.3, spanGaps: true, fill: true
+            }]
+        },
+        options: {responsive: true, scales: {y: {suggestedMin: 2.0, suggestedMax: 4.3}}}
+    });
+
+    new Chart(document.getElementById('creditChart'), {
+        type: 'bar',
+        data: {
+            labels: semesters,
+            datasets: [{
+                label: '修習學分',
+                data: analysis.per_semester.map((s) => s.attempted_credits),
+                backgroundColor: 'rgba(16,185,129,0.6)', borderColor: 'rgba(16,185,129,1)', borderWidth: 1
+            }]
+        },
+        options: {responsive: true, scales: {y: {beginAtZero: true}}}
+    });
+
+    const datasets = GRADE_ORDER.map((letter) => ({
+        label: letter,
+        data: analysis.per_semester.map((s) => (s.grade_credits || {})[letter] || 0),
+        backgroundColor: color(letter, 0.8),
+        borderColor: color(letter, 1),
+        borderWidth: 1
+    })).reverse();
+
+    new Chart(document.getElementById('stackedChart'), {
+        type: 'bar',
+        data: {labels: semesters, datasets},
+        options: {responsive: true, scales: {x: {stacked: true}, y: {stacked: true, beginAtZero: true}}}
+    });
+}
+
+function showError(message, detail) {
+    const loading = document.getElementById('loading');
+    loading.replaceChildren();
+    const title = document.createElement('p');
+    title.className = 'text-red-600';
+    title.textContent = message;
+    loading.appendChild(title);
+    if (detail) {
+        const sub = document.createElement('p');
+        sub.className = 'text-sm text-gray-500 mt-2';
+        sub.textContent = detail;
+        loading.appendChild(sub);
+    }
+}
+
+async function loadData() {
+    const res = await fetch('/api/grade-data');
+
+    if (!res.ok) {
+        let detail = '';
+        if (res.headers.get('content-type')?.includes('json')) {
+            detail = (await res.json().catch(() => ({}))).detail || '';
+        }
+        showError(`抓取資料失敗 (${res.status})`, detail);
+        if (res.status === 401) setTimeout(() => location.assign('/login'), 2000);
+        return;
+    }
+
+    const data = await res.json();
+    const analysis = data.analysis;
+
+    document.getElementById('loading').classList.add('hidden');
+    const contentEl = document.getElementById('content');
+    contentEl.classList.remove('hidden');
+    contentEl.classList.add('fade-in');
+
+    renderStudentInfo(data.student_info);
+
+    document.getElementById('overallGpa').textContent = fmtGpa(analysis.overall.gpa);
+    const latest = analysis.per_semester.at(-1);
+    document.getElementById('latestGpa').textContent = latest ? fmtGpa(latest.gpa) : '—';
+
+    renderCreditsSummary(data.credits_summary);
+    renderRankings(data.rankings);
+    renderCharts(analysis, data.semesters);
+    renderLegend('legendPopoverBody', analysis.grade_map);
+    renderCourses(data.courses);
+
+    document.getElementById('fetchTime').textContent =
+        `資料擷取時間：${new Date().toLocaleString('zh-TW', {hour12: false})}`;
+}
+
+loadData().catch((err) => {
+    console.error(err);
+    showError('載入資料時發生錯誤，請稍後再試或回報問題。');
+});

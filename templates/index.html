@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GPA Analyzer</title>
+    <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', path='apple-touch-icon.png') }}">
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', path='favicon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', path='favicon-16x16.png') }}">
+    <link rel="manifest" href="{{ url_for('static', path='site.webmanifest') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', path='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind.css') }}">
+    <script defer src="{{ url_for('static', path='vendor/chart.umd.min.js') }}"></script>
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+</head>
+<body class="min-h-screen bg-gray-50">
+<header class="bg-white border-b sticky top-0 z-20">
+    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between space-y-2 sm:space-y-0">
+        <div class="flex flex-col sm:flex-row sm:items-center space-y-1 sm:space-y-0 sm:space-x-4 w-full sm:w-auto">
+            <h1 class="text-xl font-semibold text-gray-800">GPA Analyzer</h1>
+            <div id="headerStudentInfo" class="hidden items-center text-xs sm:text-sm text-gray-500 sm:border-l sm:pl-4 space-x-2">
+                <span id="headerName" class="font-medium text-gray-700"></span>
+                <span id="headerId"></span>
+                <span id="headerClass"></span>
+            </div>
+        </div>
+        <div class="flex items-center space-x-4 relative self-end sm:self-auto">
+            <div class="group flex items-center">
+                <button type="button" class="text-sm text-gray-600 hover:text-gray-800 transition-colors leading-none">等第對照</button>
+                <div class="absolute right-0 top-full mt-2 w-64 bg-white rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 ease-in-out transform group-hover:translate-y-0 -translate-y-2 p-4 pointer-events-none group-hover:pointer-events-auto z-30 border">
+                    <h4 class="font-semibold text-gray-800 mb-2 border-b pb-1">等第對照表</h4>
+                    <div id="legendPopoverBody" class="text-xs"></div>
+                </div>
+            </div>
+            <form method="post" action="/logout">
+                <button type="submit" class="text-sm text-gray-600 hover:text-gray-800 transition-colors leading-none">登出</button>
+            </form>
+        </div>
+    </div>
+</header>
+
+<main class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+    <div id="loading" class="text-center py-16 flex flex-col items-center justify-center">
+        <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none"
+             viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="text-gray-600 mt-4">正在從學校系統抓取最新資料，請稍候...</p>
+    </div>
+
+    <div id="content" class="hidden opacity-0">
+
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
+            <div class="col-span-1 bg-white rounded-xl shadow p-4 sm:p-6">
+                <h2 class="text-sm font-medium text-gray-500">最新學期 GPA</h2>
+                <p id="latestGpa" class="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">—</p>
+            </div>
+            <div class="col-span-1 bg-white rounded-xl shadow p-4 sm:p-6">
+                <h2 class="text-sm font-medium text-gray-500">整體 GPA</h2>
+                <p id="overallGpa" class="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">—</p>
+            </div>
+            <div class="col-span-1 bg-white rounded-xl shadow p-4 sm:p-6">
+                <h2 class="text-sm font-medium text-gray-500">總學分</h2>
+                <p id="overallCredits" class="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">—</p>
+            </div>
+        </section>
+
+        <section class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-8">
+            <div class="bg-white rounded-xl shadow p-4 sm:p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">學分統計</h3>
+                <div id="creditsSummary" class="text-sm text-gray-800 space-y-2"></div>
+            </div>
+            <div class="bg-white rounded-xl shadow p-4 sm:p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">排名資料</h3>
+                <div class="overflow-y-auto max-h-64">
+                    <div class="hidden sm:block">
+                        <table class="min-w-full divide-y divide-gray-200 text-sm">
+                            <thead class="bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-3 py-2 text-left font-medium text-gray-700">學期</th>
+                                <th class="px-3 py-2 text-left font-medium text-gray-700">班排</th>
+                                <th class="px-3 py-2 text-left font-medium text-gray-700">系排</th>
+                                <th class="px-3 py-2 text-left font-medium text-gray-700">歷年班排</th>
+                                <th class="px-3 py-2 text-left font-medium text-gray-700">歷年系排</th>
+                            </tr>
+                            </thead>
+                            <tbody id="rankingBody" class="divide-y divide-gray-100"></tbody>
+                        </table>
+                    </div>
+                    <div id="rankingCards" class="sm:hidden space-y-3"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 mb-8">
+            <div class="hidden sm:block bg-white rounded-xl shadow p-4 sm:p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">每學期平均 GPA</h3>
+                <canvas id="gpaChart" height="120"></canvas>
+            </div>
+            <div class="bg-white rounded-xl shadow p-4 sm:p-6">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">每學期學分數</h3>
+                <canvas id="creditChart" height="120"></canvas>
+            </div>
+        </section>
+
+        <section class="hidden sm:block bg-white rounded-xl shadow p-4 sm:p-6 mb-8">
+            <h3 class="text-lg font-semibold text-gray-800 mb-4">每學期各等第學分數（堆疊）</h3>
+            <canvas id="stackedChart" height="140"></canvas>
+        </section>
+
+        <section class="bg-white rounded-xl shadow p-4 sm:p-6 mb-8">
+            <div class="flex items-center justify-between flex-wrap gap-2 mb-4">
+                <h3 class="text-lg font-semibold text-gray-800">課程清單</h3>
+                <div id="fetchTime" class="text-xs text-gray-500">資料由學校成績系統即時擷取</div>
+            </div>
+            <div class="hidden sm:block overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-2 text-left font-medium text-gray-700">學期</th>
+                        <th class="px-3 py-2 text-left font-medium text-gray-700">課號</th>
+                        <th class="px-3 py-2 text-left font-medium text-gray-700">課程名稱</th>
+                        <th class="px-3 py-2 text-left font-medium text-gray-700">學分</th>
+                        <th class="px-3 py-2 text-left font-medium text-gray-700">成績</th>
+                        <th class="px-3 py-2 text-left font-medium text-gray-700">向度</th>
+                    </tr>
+                    </thead>
+                    <tbody id="courseBody" class="divide-y divide-gray-100"></tbody>
+                </table>
+            </div>
+            <div id="courseCards" class="sm:hidden space-y-4"></div>
+        </section>
+    </div>
+</main>
+</body>
+</html>

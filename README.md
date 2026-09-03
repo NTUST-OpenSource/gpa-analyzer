@@ -1,0 +1,190 @@
+<div align="center">
+
+# GPA Analyzer
+
+[![License](https://img.shields.io/github/license/NTUST-OpenSource/gpa-analyzer?style=for-the-badge)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/NTUST-OpenSource/gpa-analyzer/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/NTUST-OpenSource/gpa-analyzer/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/Python-3.14-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![GHCR](https://img.shields.io/badge/GHCR-Image-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://github.com/NTUST-OpenSource/gpa-analyzer/pkgs/container/gpa-analyzer)
+
+**繁體中文** | [English](README.en.md)
+
+</div>
+
+## 總覽
+
+GPA Analyzer 是一套**自架**的臺科大成績分析工具。
+
+學校的成績查詢系統只給你一張表格 — 沒有 GPA、沒有趨勢、沒有各等第的分佈。這個專案登入你的帳號、抓下歷年成績，然後把它變成看得懂的東西。
+
+### 📊 **成績分析**
+- 每學期 / 整體 **GPA**（學分加權，A+ = 4.3）
+- 修習學分、已實得學分、修習中學分一次看完
+- 通過 / 退選 / 抵免等非等第課程自動排除在 GPA 之外
+
+### 📈 **互動式圖表**
+- 每學期 GPA 折線圖，一眼看出走勢
+- 每學期學分數長條圖
+- 各等第學分數堆疊圖，知道自己的成績分佈長什麼樣
+
+### 🏅 **排名與課程**
+- 學期班排、系排與歷年累計排名
+- 完整課程清單，含課號、學分、成績、通識向度
+- 手機、平板、桌機皆有對應版面
+
+<br/>
+
+## 快速開始
+
+### Docker（建議）
+
+```bash
+# 產生 session 加密金鑰
+SECRET_KEY=$(docker run --rm ghcr.io/ntust-opensource/gpa-analyzer:latest \
+  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+
+docker run -d --name gpa-analyzer \
+  -p 8000:8000 \
+  -e SECRET_KEY="$SECRET_KEY" \
+  -v gpa-analyzer-cache:/data \
+  ghcr.io/ntust-opensource/gpa-analyzer:latest
+```
+
+映像檔支援 `linux/amd64` 與 `linux/arm64`。
+
+> [!IMPORTANT]
+> 預設 `COOKIE_SECURE=true`，session cookie 只會透過 HTTPS 傳送。
+> 若要在本機用 `http://` 測試，請加上 `-e COOKIE_SECURE=false`；正式環境請放在 HTTPS 反向代理之後。
+
+### Docker Compose
+
+```yaml
+services:
+  gpa-analyzer:
+    image: ghcr.io/ntust-opensource/gpa-analyzer:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY in .env}
+      FORWARDED_ALLOW_IPS: 127.0.0.1
+    volumes:
+      - cache:/data
+
+volumes:
+  cache:
+```
+
+### 從原始碼執行
+
+需要 [uv](https://docs.astral.sh/uv/) 與 Python 3.14。
+
+```bash
+git clone https://github.com/NTUST-OpenSource/gpa-analyzer.git
+cd gpa-analyzer
+
+cp .env.example .env
+uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# 把輸出填進 .env 的 SECRET_KEY，本機測試再把 COOKIE_SECURE 設為 false
+
+uv sync
+./start.sh
+```
+
+開啟 <http://localhost:20001>，用學號與 Moodle 密碼登入。
+
+<br/>
+
+## 設定
+
+所有設定都透過環境變數，可寫在 `.env`（參考 [`.env.example`](.env.example)）。
+
+| 變數 | 預設值 | 說明 |
+|---|---|---|
+| `SECRET_KEY` | 無，**必填** | Fernet 金鑰，用來加密 session cookie。未設定時服務不會啟動 |
+| `COOKIE_SECURE` | `true` | session cookie 是否只走 HTTPS。設為 `true` 時 cookie 會加上 `__Host-` 前綴 |
+| `PORT` | `8000`（`start.sh` 為 `20001`） | 監聽埠號 |
+| `CACHE_DIR` | `.cache`（容器內為 `/data`） | 爬蟲快取存放位置 |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1` | 信任 `X-Forwarded-For` 的來源 IP，**請填實際反向代理的位址** |
+| `NTUST_USERNAME` / `NTUST_PASSWORD` | 無 | 僅供 `GpaAnalyzer.py` 命令列使用，Web 服務不會讀取 |
+
+> [!WARNING]
+> `SECRET_KEY` 外洩等同所有使用者的密碼外洩。請妥善保管，切勿提交進版控。
+> 更換 `SECRET_KEY` 會讓所有既有 session 失效，使用者需重新登入。
+
+### 命令列
+
+不啟動 Web 服務，直接輸出 JSON：
+
+```bash
+uv run python GpaAnalyzer.py <學號> <密碼>
+# 或把帳密放進 .env 的 NTUST_USERNAME / NTUST_PASSWORD 後直接執行
+uv run python GpaAnalyzer.py
+```
+
+<br/>
+
+## 安全性
+
+這個服務會處理你的學校帳號密碼，設計上做了以下處理：
+
+| 項目 | 作法 |
+|---|---|
+| **憑證儲存** | 以 Fernet（AES-128-CBC + HMAC）加密後存在瀏覽器 cookie，伺服器不保存資料庫。cookie 為 `HttpOnly` + `SameSite=Strict`，預設 7 天後失效 |
+| **為何需要保存密碼** | 學校成績系統沒有 API 或長效 token，每次查詢都必須重新登入，因此密碼必須可還原 |
+| **TLS** | 對學校系統的連線會完整驗證憑證鏈、有效期限與主機名稱。僅關閉 Python 3.13+ 新增的嚴格 RFC 5280 擴充欄位檢查 — 學校憑證鏈中有一張中介憑證缺少 Subject Key Identifier |
+| **Cookie 快取** | 學校的 session cookie 會以 `HMAC(SECRET_KEY, 帳號:密碼)` 為索引快取 30 分鐘，密碼不同就不會命中，快取不能取代驗證 |
+| **暴力破解** | 登入每 IP、每帳號各限 5 次 / 5 分鐘；API 限 30 次 / 5 分鐘 |
+| **XSS** | 嚴格 CSP（`default-src 'none'`、無 `unsafe-inline`），所有前端資源自架、無 CDN，注入 DOM 的資料一律逸出 |
+| **CSRF** | `SameSite=Strict` cookie，登入與登出皆檢查 Origin，登出只接受 POST |
+
+> [!CAUTION]
+> 這是自架服務。架設者在技術上有能力讀取使用者的密碼 — 請只使用你自己信任的站點。
+
+發現安全問題請透過 [GitHub Security Advisory](https://github.com/NTUST-OpenSource/gpa-analyzer/security/advisories/new) 回報，請勿開公開 issue。
+
+<br/>
+
+## 開發
+
+```bash
+uv sync --all-groups
+
+uv run pytest              # 測試
+uv run ruff check .        # 靜態檢查
+uv run ruff format .       # 格式化
+```
+
+前端樣式由 Tailwind CSS 產生，修改 `templates/` 或 `static/app.js` 的 class 之後要重新建置：
+
+```bash
+npm install
+npm run build              # 產出 static/vendor/tailwind.css
+```
+
+CI 會檢查 `static/vendor/tailwind.css` 是否為最新，忘了重新建置會失敗。
+
+### 專案結構
+
+```
+app.py               FastAPI 應用：登入、session、API 端點
+GpaAnalyzer.py       爬蟲、HTML 解析與 GPA 計算
+templates/           Jinja2 樣板
+static/              前端資源（app.js 與自架的 vendor/）
+assets/tailwind.css  Tailwind 原始樣式
+tests/               pytest 測試
+```
+
+<br/>
+
+## 授權
+
+本專案採用 **GNU Affero General Public License v3.0 或更新版本** 授權，完整條款見 [LICENSE](LICENSE)。
+
+AGPL 的重點：若你修改本專案並提供網路服務給他人使用，必須向使用者提供你修改後的原始碼。
+
+<br/>
+
+## 免責聲明
+
+本專案與國立臺灣科技大學無官方關聯。使用者需自行負責遵守學校的資訊系統使用規範。
