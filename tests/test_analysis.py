@@ -1,6 +1,6 @@
 import pytest
 
-from GpaAnalyzer import (
+from gpa_analyzer.analyzer import (
     _parse_credits,
     analyze_courses,
     grade_to_gpa,

@@ -28,7 +28,8 @@ RUN groupadd --system --gid 1001 app \
 WORKDIR /app
 
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
-COPY --chown=app:app LICENSE app.py GpaAnalyzer.py ./
+COPY --chown=app:app LICENSE ./
+COPY --chown=app:app gpa_analyzer/ ./gpa_analyzer/
 COPY --chown=app:app static/ ./static/
 COPY --chown=app:app templates/ ./templates/
 
@@ -41,4 +42,4 @@ VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,os,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/healthz', timeout=3).status == 200 else 1)"
 
-CMD ["sh", "-c", "exec uvicorn app:app --host 0.0.0.0 --port \"$PORT\" --proxy-headers --forwarded-allow-ips \"$FORWARDED_ALLOW_IPS\""]
+CMD ["python", "-m", "gpa_analyzer.app"]

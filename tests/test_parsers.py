@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from bs4 import BeautifulSoup
 
-from GpaAnalyzer import NtustGradeScraper
+from gpa_analyzer.analyzer import NtustGradeScraper
 
 FIXTURE = Path(__file__).parent / "fixtures" / "grades.html"
 
@@ -131,7 +131,7 @@ def test_student_info_skips_a_td_based_header_row():
 
 
 def test_parse_credits_never_returns_a_negative():
-    from GpaAnalyzer import _parse_credits
+    from gpa_analyzer.analyzer import _parse_credits
 
     assert _parse_credits("-2") == 2.0
     assert _parse_credits("(3)") == 3.0

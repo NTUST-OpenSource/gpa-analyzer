@@ -8,9 +8,9 @@ import time
 
 import pytest
 
-import app as web
-import GpaAnalyzer as gpa
-from GpaAnalyzer import NtustGradeScraper
+from gpa_analyzer import analyzer as gpa
+from gpa_analyzer import app as web
+from gpa_analyzer.analyzer import NtustGradeScraper
 
 
 @pytest.fixture
@@ -193,7 +193,7 @@ def test_cache_writes_survive_a_concurrent_process(tmp_path, monkeypatch):
         os.environ["CACHE_DIR"] = {str(tmp_path)!r}
         os.environ["SECRET_KEY"] = os.environ.get("SECRET_KEY", "k")
         sys.path.insert(0, {str(gpa.ROOT)!r})
-        from GpaAnalyzer import NtustGradeScraper
+        from gpa_analyzer.analyzer import NtustGradeScraper
         for i in range(20):
             s = NtustGradeScraper(f"{{sys.argv[1]}}-{{i}}", "pw")
             s.client.cookies.set("StuScoreQueryServ", "v")

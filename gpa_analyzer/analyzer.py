@@ -24,7 +24,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 
 COOKIE_CACHE_TTL = 30 * 60
 STUDENT_INFO_TTL = 7 * 24 * 60 * 60

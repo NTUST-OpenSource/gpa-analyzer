@@ -16,13 +16,14 @@ from fastapi.templating import Jinja2Templates
 from starlette.concurrency import run_in_threadpool
 from starlette.staticfiles import StaticFiles
 
-from GpaAnalyzer import NtustGradeScraper, analyze_courses
+from gpa_analyzer.analyzer import NtustGradeScraper, analyze_courses
 
+# Never overrides what the shell already exported: shell env wins over .env.
 load_dotenv()
 
 logger = logging.getLogger("gpa_analyzer")
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").strip().lower() not in {"0", "false", "no"}
 SESSION_COOKIE = "__Host-gpaa_session" if COOKIE_SECURE else "gpaa_session"
 SESSION_MAX_AGE = 7 * 24 * 60 * 60
@@ -42,8 +43,8 @@ RATE_WINDOW = 300
 # NAT, or a proxy whose forwarded headers are not trusted, collapses many
 # students onto one address and must not be able to lock the account budget.
 LOGIN_FAILURE_RATE = (_int_env("LOGIN_FAILURE_LIMIT", 5), RATE_WINDOW)
-LOGIN_ATTEMPT_RATE = (_int_env("LOGIN_ATTEMPT_LIMIT", 120), RATE_WINDOW)
-API_RATE = (_int_env("API_RATE_LIMIT", 30), RATE_WINDOW)
+LOGIN_ATTEMPT_RATE = (_int_env("LOGIN_ATTEMPT_LIMIT", 10), RATE_WINDOW)
+API_RATE = (_int_env("API_RATE_LIMIT", 10), RATE_WINDOW)
 
 # Hosts accepted on top of the Host header, for proxies that rewrite it.
 TRUSTED_ORIGINS = {
@@ -320,4 +321,16 @@ async def api_grade_data(request: Request):
             "analysis": analysis,
             "semesters": [p["semester"] for p in analysis.get("per_semester", [])],
         }
+    )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        app,
+        host=os.getenv("HOST", "0.0.0.0"),  # noqa: S104 - a container needs every interface
+        port=int(os.getenv("PORT", "8000")),
+        proxy_headers=True,
+        forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"),
     )

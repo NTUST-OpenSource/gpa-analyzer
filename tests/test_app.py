@@ -4,7 +4,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-import app as web
+from gpa_analyzer import app as web
 
 GRADE_DATA = {
     "courses": [{"semester": "113-1", "course_id": "CS1", "credits": "3", "grade": "A"}],
