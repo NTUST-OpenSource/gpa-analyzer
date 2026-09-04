@@ -109,9 +109,9 @@ uv run python -m gpa_analyzer.app
 | `CACHE_DIR` | `.cache`（容器內為 `/data`）                | 爬蟲快取存放位置 |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1`                                 | 信任 `X-Forwarded-For` 的來源 IP，**請填實際反向代理的位址** |
 | `TRUSTED_ORIGINS` | 空                                          | 額外接受的 Origin 主機名稱，以逗號分隔。僅在反向代理會改寫 `Host` 時需要 |
-| `LOGIN_FAILURE_LIMIT` | `5`                                         | 每 5 分鐘、每帳號與每 IP 允許的登入失敗次數 |
+| `LOGIN_FAILURE_LIMIT` | `5`                                         | 每 5 分鐘、每帳號允許的登入失敗次數 |
 | `LOGIN_ATTEMPT_LIMIT` | `10`                                        | 每 5 分鐘、每 IP 允許的登入嘗試次數 |
-| `API_RATE_LIMIT` | `10`                                        | 每 5 分鐘、每 IP 允許的 API 請求次數 |
+| `API_RATE_LIMIT` | `10`                                        | 每 5 分鐘、每帳號允許的 API 請求次數 |
 | `NTUST_USERNAME` / `NTUST_PASSWORD` | 無                                          | 僅供命令列模式使用，Web 服務不會讀取 |
 
 > [!NOTE]
@@ -140,7 +140,7 @@ uv run python -m gpa_analyzer.analyzer
 | **為何需要保存密碼** | 學校成績系統沒有 API 或長效 token，每次查詢都必須重新登入，因此密碼必須可還原                                                         |
 | **TLS** | 對學校系統的連線會完整驗證憑證鏈、有效期限與主機名稱                                                                                  |
 | **Cookie 快取** | 學校的 session cookie 索引快取 30 分鐘                                                                                                |
-| **暴力破解** | 登入失敗每 IP、每帳號各限 5 次 / 5 分鐘；登入嘗試每 IP 限 10 次 / 5 分鐘；API 限 10 次 / 5 分鐘                           |
+| **暴力破解** | 登入失敗每帳號限 5 次 / 5 分鐘；登入嘗試每 IP 限 10 次 / 5 分鐘；API 每帳號限 10 次 / 5 分鐘                           |
 | **XSS** | 嚴格 CSP、無 CDN                                                                                                                      |
 | **CSRF** | `SameSite=Strict` cookie，登入與登出皆檢查 Origin，登出只接受 POST                                                                    |
 
