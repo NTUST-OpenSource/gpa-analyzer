@@ -1,7 +1,11 @@
 name: CI
 
 on:
+  # Every contribution targets dev. Filtering on the base branch is also what
+  # keeps the dev -> main release PR from re-running the checks the push to dev
+  # already reported against that same commit.
   pull_request:
+    branches: [dev]
   # Re-check dev itself: a merged PR was tested against the dev tip it
   # branched from, not against whatever landed there since.
   push:

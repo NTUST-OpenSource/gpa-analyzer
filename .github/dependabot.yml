@@ -3,6 +3,7 @@ version: 2
 updates:
   - package-ecosystem: uv
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -17,6 +18,7 @@ updates:
 
   - package-ecosystem: npm
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -31,6 +33,7 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
@@ -44,6 +47,7 @@ updates:
 
   - package-ecosystem: docker
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
       day: monday
