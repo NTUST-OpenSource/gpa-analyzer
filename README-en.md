@@ -109,9 +109,9 @@ Values are read with **shell environment > `.env`** precedence: anything already
 | `CACHE_DIR` | `.cache` (`/data` in the container) | Where the scraper stores its caches |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Which peers may set `X-Forwarded-For`. **Set this to your actual reverse proxy** |
 | `TRUSTED_ORIGINS` | empty | Extra hostnames accepted in `Origin`, comma separated. Only needed when a proxy rewrites `Host` |
-| `LOGIN_FAILURE_LIMIT` | `5` | Failed sign-ins allowed per account and per IP, per 5 minutes |
+| `LOGIN_FAILURE_LIMIT` | `5` | Failed sign-ins allowed per account, per 5 minutes |
 | `LOGIN_ATTEMPT_LIMIT` | `10` | Sign-in attempts allowed per IP, per 5 minutes |
-| `API_RATE_LIMIT` | `10` | API requests allowed per IP, per 5 minutes |
+| `API_RATE_LIMIT` | `10` | API requests allowed per account, per 5 minutes |
 | `NTUST_USERNAME` / `NTUST_PASSWORD` | none | Used only by the command line mode. The web service never reads them |
 
 > [!NOTE]
@@ -140,7 +140,7 @@ This service handles university credentials. Here is how it treats them:
 | **Why the password is kept** | The grade portal offers no API and no long-lived token, so every query needs a fresh sign-in — the password has to be recoverable |
 | **TLS** | Connections to the university verify the full chain, expiry, and hostname |
 | **Cookie cache** | The portal's session cookies are cached under a derived index for 30 minutes |
-| **Brute force** | Failed sign-ins capped at 5 per IP and per account / 5 minutes; sign-in attempts at 10 per IP / 5 minutes; the API at 10 / 5 minutes |
+| **Brute force** | Failed sign-ins capped at 5 per account / 5 minutes; sign-in attempts at 10 per IP / 5 minutes; the API at 10 per account / 5 minutes |
 | **XSS** | Strict CSP, no CDN |
 | **CSRF** | `SameSite=Strict` cookies, Origin checks on sign-in and sign-out, and sign-out accepts POST only |
 
