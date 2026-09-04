@@ -130,6 +130,20 @@ const TAB_IDLE = 'text-gray-500 border-transparent hover:text-gray-700 hover:bor
 
 const semesterOf = (course) => String(course.semester ?? '').trim();
 
+// Numeric, segment by segment: ROC year 99 precedes 100, which a string
+// comparison gets backwards. Mirrors semester_sort_key() in analyzer.py.
+const semesterParts = (semester) => (String(semester).match(/\d+/g) || []).map(Number);
+
+function compareSemesterDesc(a, b) {
+    const left = semesterParts(a);
+    const right = semesterParts(b);
+    for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+        const diff = (right[i] ?? -1) - (left[i] ?? -1);
+        if (diff !== 0) return diff;
+    }
+    return 0;
+}
+
 function renderCourseRows(courses) {
     const tbody = document.getElementById('courseBody');
     const courseCards = document.getElementById('courseCards');
@@ -178,7 +192,7 @@ function renderCourses(courses) {
     tabs.replaceChildren();
 
     const sorted = [...(courses || [])].sort((a, b) =>
-        (b.semester || '').localeCompare(a.semester || '') ||
+        compareSemesterDesc(a.semester || '', b.semester || '') ||
         (a.course_id || '').localeCompare(b.course_id || '')
     );
 
