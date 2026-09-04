@@ -116,6 +116,69 @@ def test_login_rejects_cross_origin_post(client):
     assert r.status_code == 403
 
 
+def test_login_rejects_the_opaque_null_origin(client):
+    """`null` is what a sandboxed iframe or a data: URL sends, so it must stay
+    rejected. Guards against "fixing" the no-referrer outage by allowing it."""
+    r = client.post("/login", data={"username": "u", "password": "p"}, headers={"origin": "null"})
+    assert r.status_code == 403
+
+
+def test_referrer_policy_leaves_the_origin_header_intact(client):
+    """The other half of that regression: no-referrer nulls Origin on form posts."""
+    assert client.get("/login").headers["referrer-policy"] == "strict-origin-when-cross-origin"
+
+
+def test_login_accepts_an_origin_that_differs_only_by_port(client, monkeypatch):
+    """Ports are not a cookie boundary, and a proxied Host header may carry one."""
+    monkeypatch.setattr(web, "_verify_credentials", lambda u, p: True)
+    r = client.post(
+        "/login",
+        data={"username": "B11234567", "password": "pw"},
+        headers={"origin": "http://testserver:8443"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 302
+
+
+def test_login_rejects_an_http_origin_when_cookies_require_https(client, monkeypatch):
+    monkeypatch.setattr(web, "COOKIE_SECURE", True)
+    monkeypatch.setattr(web, "_verify_credentials", lambda u, p: True)
+    r = client.post(
+        "/login",
+        data={"username": "B11234567", "password": "pw"},
+        headers={"origin": "http://testserver"},
+    )
+    assert r.status_code == 403
+
+
+def test_a_rejected_origin_says_what_was_compared(client, caplog):
+    """Regression: a bare 403 sent operators hunting through the reverse proxy."""
+    with caplog.at_level("WARNING", logger="gpa_analyzer"):
+        client.post(
+            "/login",
+            data={"username": "u", "password": "p"},
+            headers={"origin": "https://evil.example"},
+        )
+    assert "evil.example" in caplog.text
+    assert "testserver" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("gpa.ntust.org", "gpa.ntust.org"),
+        ("https://gpa.ntust.org", "gpa.ntust.org"),
+        ("  https://GPA.ntust.org:8443 ", "gpa.ntust.org"),
+        ("null", ""),
+        ("", ""),
+        ("http://[oops", ""),
+    ],
+)
+def test_origin_host_normalises_trusted_entries(raw, expected):
+    """TRUSTED_ORIGINS is documented as hostnames, but a pasted full origin is likelier."""
+    assert web._origin_host(raw) == expected
+
+
 def test_logout_is_not_reachable_by_get(client):
     assert client.get("/logout", follow_redirects=False).status_code == 405
 

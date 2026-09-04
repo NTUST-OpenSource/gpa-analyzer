@@ -6,6 +6,7 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 from threading import Lock
+from typing import NoReturn
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -46,9 +47,22 @@ LOGIN_FAILURE_RATE = (_int_env("LOGIN_FAILURE_LIMIT", 5), RATE_WINDOW)
 LOGIN_ATTEMPT_RATE = (_int_env("LOGIN_ATTEMPT_LIMIT", 10), RATE_WINDOW)
 API_RATE = (_int_env("API_RATE_LIMIT", 10), RATE_WINDOW)
 
-# Hosts accepted on top of the Host header, for proxies that rewrite it.
+
+def _origin_host(value: str) -> str:
+    """Hostname out of an origin, a bare `host[:port]`, or a full URL; "" when there is none."""
+    value = value.strip()
+    if not value or value.lower() == "null":
+        return ""
+    try:
+        return urlsplit(value if "//" in value else f"//{value}").hostname or ""
+    except ValueError:
+        return ""
+
+
+# Hosts accepted on top of the Host header, for proxies that rewrite it. Parsed
+# the same way as an Origin so a pasted "https://host" entry also works.
 TRUSTED_ORIGINS = {
-    h.strip().lower() for h in os.getenv("TRUSTED_ORIGINS", "").split(",") if h.strip()
+    host for entry in os.getenv("TRUSTED_ORIGINS", "").split(",") if (host := _origin_host(entry))
 }
 
 CSP = (
@@ -145,18 +159,53 @@ def _client_key(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+def _reject_origin(request: Request, source: str, reason: str) -> NoReturn:
+    """A bare 403 here is indistinguishable from a proxy fault; log what was compared."""
+    logger.warning(
+        "Rejected %s %s (%s): Origin/Referer=%r Host=%r TRUSTED_ORIGINS=%s",
+        request.method,
+        request.url.path,
+        reason,
+        source,
+        request.headers.get("host"),
+        sorted(TRUSTED_ORIGINS) or "unset",
+    )
+    raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
+
+
 def _require_same_origin(request: Request) -> None:
-    """Rejects cross-site form posts; SameSite cookies alone do not cover login CSRF."""
+    """
+    Rejects cross-site form posts; SameSite cookies alone do not cover login CSRF.
+
+    A browser always sends Origin on a POST, so a request carrying neither header
+    is not from one and cannot be the vector this guards against.
+    """
     source = request.headers.get("origin") or request.headers.get("referer")
     if source is None:
         return
+
+    # "null" is the opaque origin a sandboxed iframe or a data: URL sends, and it
+    # names no host. Reject it by name: urlsplit would otherwise reduce it to an
+    # empty hostname that fails the comparison below for the wrong reason.
+    if source.strip().lower() == "null":
+        _reject_origin(request, source, "opaque origin")
+
     try:
-        host = urlsplit(source).netloc.lower()
+        parts = urlsplit(source)
     except ValueError:
-        raise HTTPException(status_code=403, detail="Malformed origin.") from None
-    allowed = {(request.headers.get("host") or "").lower()} | TRUSTED_ORIGINS
-    if host not in allowed:
-        raise HTTPException(status_code=403, detail="Cross-origin request rejected.")
+        _reject_origin(request, source, "malformed origin")
+
+    # An http:// origin against an HTTPS deployment is a downgrade, not a peer.
+    # COOKIE_SECURE is this app's "we are behind TLS" switch and, unlike
+    # X-Forwarded-Proto, no proxy can get it wrong.
+    if COOKIE_SECURE and parts.scheme and parts.scheme != "https":
+        _reject_origin(request, source, "insecure scheme")
+
+    # Hostnames, not netlocs: a netloc carries the port and any userinfo, neither
+    # of which TRUSTED_ORIGINS is documented to hold.
+    allowed = ({_origin_host(request.headers.get("host", ""))} | TRUSTED_ORIGINS) - {""}
+    if (parts.hostname or "") not in allowed:
+        _reject_origin(request, source, "host mismatch")
 
 
 @app.middleware("http")
@@ -164,7 +213,10 @@ async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("Content-Security-Policy", CSP)
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # Not "no-referrer": under it browsers send `Origin: null` on a form POST,
+    # which _require_same_origin must then reject. Same-origin Referer is kept,
+    # cross-origin is trimmed to the bare origin, downgrades send nothing.
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
