@@ -122,18 +122,27 @@ function renderRankings(rankings) {
     }
 }
 
-function renderCourses(courses) {
+const ALL_SEMESTERS = '__all__';
+
+const TAB_BASE = 'whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 transition-colors';
+const TAB_ACTIVE = 'text-indigo-600 border-indigo-600';
+const TAB_IDLE = 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300';
+
+const semesterOf = (course) => String(course.semester ?? '').trim();
+
+function renderCourseRows(courses) {
     const tbody = document.getElementById('courseBody');
     const courseCards = document.getElementById('courseCards');
     tbody.replaceChildren();
     courseCards.replaceChildren();
 
-    const sorted = [...(courses || [])].sort((a, b) =>
-        (b.semester || '').localeCompare(a.semester || '') ||
-        (a.course_id || '').localeCompare(b.course_id || '')
-    );
+    if (courses.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="px-3 py-4 text-center text-gray-500">無課程資料</td></tr>`;
+        courseCards.innerHTML = `<p class="text-center text-gray-500 py-4">無課程資料</p>`;
+        return;
+    }
 
-    for (const c of sorted) {
+    for (const c of courses) {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td class="px-3 py-2 text-gray-700">${esc(c.semester)}</td>
@@ -162,6 +171,51 @@ function renderCourses(courses) {
         `;
         courseCards.appendChild(card);
     }
+}
+
+function renderCourses(courses) {
+    const tabs = document.getElementById('semesterTabs');
+    tabs.replaceChildren();
+
+    const sorted = [...(courses || [])].sort((a, b) =>
+        (b.semester || '').localeCompare(a.semester || '') ||
+        (a.course_id || '').localeCompare(b.course_id || '')
+    );
+
+    // `sorted` runs newest semester first, so the tabs inherit that order.
+    const semesters = [...new Set(sorted.map(semesterOf))];
+
+    // One semester needs no tabs: "全部" would show exactly the same rows.
+    if (semesters.length < 2) {
+        tabs.classList.add('hidden');
+        tabs.classList.remove('flex');
+        renderCourseRows(sorted);
+        return;
+    }
+
+    const select = (key) => {
+        for (const button of tabs.children) {
+            const active = button.dataset.semester === key;
+            button.className = `${TAB_BASE} ${active ? TAB_ACTIVE : TAB_IDLE}`;
+            button.setAttribute('aria-pressed', String(active));
+        }
+        renderCourseRows(key === ALL_SEMESTERS ? sorted : sorted.filter((c) => semesterOf(c) === key));
+    };
+
+    for (const [key, label] of [[ALL_SEMESTERS, '全部'], ...semesters.map((s) => [s, s])]) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.semester = key;
+        button.textContent = label;
+        button.addEventListener('click', () => select(key));
+        tabs.appendChild(button);
+    }
+
+    // Both classes set `display`, so they are swapped rather than combined.
+    tabs.classList.remove('hidden');
+    tabs.classList.add('flex');
+
+    select(semesters[0]);
 }
 
 function renderCharts(analysis, semesters) {
