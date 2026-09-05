@@ -277,6 +277,10 @@ function renderCharts(analysis, semesters) {
 
 function showError(message, detail) {
     const loading = document.getElementById('loading');
+    // loadData() hides #loading before it renders, so anything throwing from the
+    // render calls would otherwise leave a blank dashboard and no message at all.
+    loading.classList.remove('hidden');
+    document.getElementById('content').classList.add('hidden');
     loading.replaceChildren();
     const title = document.createElement('p');
     title.className = 'text-red-600';
