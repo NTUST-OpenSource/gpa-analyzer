@@ -5,7 +5,8 @@
   "description": "Front-end asset build for GPA Analyzer.",
   "scripts": {
     "build": "tailwindcss -i assets/tailwind.css -o static/vendor/tailwind.css --minify",
-    "watch": "tailwindcss -i assets/tailwind.css -o static/vendor/tailwind.css --watch"
+    "watch": "tailwindcss -i assets/tailwind.css -o static/vendor/tailwind.css --watch",
+    "test": "node --test tests/app.test.js"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.1.16",

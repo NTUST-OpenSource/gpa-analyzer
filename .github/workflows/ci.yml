@@ -70,8 +70,8 @@ jobs:
             exit 1
           fi
 
-      - name: Check app.js syntax
-        run: node --check static/app.js
+      - name: Test app.js
+        run: npm test
 
   docker:
     name: Build image

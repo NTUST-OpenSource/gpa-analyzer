@@ -17,3 +17,51 @@
         transform: translateY(0);
     }
 }
+
+/* Semester tab switching. The panel is named so only the course list animates:
+   a root transition would cross-fade the whole page, and the 60-rows-to-4-rows
+   height change would visibly squash the outgoing snapshot. */
+#coursePanel {
+    view-transition-name: course-list;
+}
+
+::view-transition-old(course-list),
+::view-transition-new(course-list) {
+    animation-duration: 200ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    /* Hold both snapshots at their natural size so the group's height morph
+       clips them instead of stretching the rows. */
+    height: 100%;
+    object-fit: none;
+    object-position: top left;
+}
+
+/* The rest of the page is identical across the swap. The group is pinned too, not
+   just the cross-fade: it would otherwise spend 250ms resizing to the new document
+   height and stretch the page snapshot inside it. */
+::view-transition-group(root),
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+        animation: none !important;
+    }
+}
+
+/* Naming the marker is what makes it slide: the view transition sees one element
+   in two places and morphs between them, so no offsetLeft measuring, no resize
+   listener, and it handles the vertical hop when the strip wraps. */
+.tab-indicator {
+    view-transition-name: tab-indicator;
+}
+
+::view-transition-group(tab-indicator) {
+    animation-duration: 250ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
