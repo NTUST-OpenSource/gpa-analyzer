@@ -159,6 +159,9 @@ function renderCourseRows(courses = []) {
     }
 
     for (const c of courses) {
+        // Most courses carry no 通識向度; an empty field is noise, not information.
+        const dimension = String(c.dimension ?? '').trim();
+
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td class="px-3 py-2 text-gray-700">${esc(c.semester)}</td>
@@ -166,7 +169,7 @@ function renderCourseRows(courses = []) {
             <td class="px-3 py-2 text-gray-900 font-medium">${esc(c.course_name)}</td>
             <td class="px-3 py-2 tabular-nums">${esc(c.credits)}</td>
             <td class="px-3 py-2">${esc(c.grade)}</td>
-            <td class="px-3 py-2 text-gray-700">${esc(c.dimension || '-')}</td>
+            <td class="px-3 py-2 text-gray-700">${esc(dimension)}</td>
         `;
         tbody.appendChild(tr);
 
@@ -182,7 +185,7 @@ function renderCourseRows(courses = []) {
             </div>
             <div class="flex justify-between text-xs text-gray-600 border-t pt-2 mt-1">
                 <span>學分：${esc(c.credits)}</span>
-                <span>向度：${esc(c.dimension || '-')}</span>
+                ${dimension ? `<span>向度：${esc(dimension)}</span>` : ''}
             </div>
         `;
         courseCards.appendChild(card);
