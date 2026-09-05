@@ -226,18 +226,32 @@ function renderCourses(courses = [], semesters = []) {
     const select = (key, {fromUser = false} = {}) => {
         const active = tabButtons.find((tab) => tab.key === key) ?? tabButtons[0];
 
-        for (const tab of tabButtons) {
-            const isActive = tab === active;
-            tab.button.className = `${TAB_BASE} ${isActive ? TAB_ACTIVE : TAB_IDLE}`;
-            tab.button.setAttribute('aria-selected', String(isActive));
-            // Roving tabindex: the strip is one stop, not one per semester.
-            tab.button.tabIndex = isActive ? 0 : -1;
-        }
-        panel.setAttribute('aria-labelledby', active.button.id);
-        renderCourseRows(active.key === null ? sorted : sorted.filter((c) => semesterOf(c) === active.key));
-        // The credit summary and all three charts above stay all-time, so the list
-        // has to say out loud that it is not.
-        document.getElementById('courseScope').textContent = `· ${active.button.textContent}`;
+        const paint = () => {
+            for (const tab of tabButtons) {
+                const isActive = tab === active;
+                tab.button.className = `${TAB_BASE} ${isActive ? TAB_ACTIVE : TAB_IDLE}`;
+                tab.button.setAttribute('aria-selected', String(isActive));
+                // Roving tabindex: the strip is one stop, not one per semester.
+                tab.button.tabIndex = isActive ? 0 : -1;
+            }
+            panel.setAttribute('aria-labelledby', active.button.id);
+            renderCourseRows(active.key === null ? sorted : sorted.filter((c) => semesterOf(c) === active.key));
+            // The credit summary and all three charts above stay all-time, so the list
+            // has to say out loud that it is not.
+            document.getElementById('courseScope').textContent = `· ${active.button.textContent}`;
+
+            if (!fromUser) return;
+            active.button.focus();
+            // A shorter tab shrinks the document, and the browser clamps the scroll
+            // offset to the new maximum - which lands the reader on the footer.
+            if (tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView({block: 'start'});
+        };
+
+        // Cross-fading one list into another while its height changes is exactly what
+        // view transitions do; the styling lives in assets/tailwind.css. Browsers
+        // without them keep today's instant swap.
+        if (fromUser && document.startViewTransition) document.startViewTransition(paint);
+        else paint();
 
         // Only an explicit choice goes in the URL, so a plain load stays clean and
         // still opens on the newest semester while a shared link keeps its tab. The
@@ -249,12 +263,6 @@ function renderCourses(courses = [], semesters = []) {
             url.searchParams.delete(SEMESTER_PARAM);
         }
         if (url.href !== window.location.href) history.replaceState(null, '', url);
-
-        if (!fromUser) return;
-        active.button.focus();
-        // A shorter tab shrinks the document, and the browser clamps the scroll
-        // offset to the new maximum - which lands the reader on the footer.
-        if (tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView({block: 'start'});
     };
 
     const ARROW_STEP = {ArrowLeft: -1, ArrowRight: 1};
