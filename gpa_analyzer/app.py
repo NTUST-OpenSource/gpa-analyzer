@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import json
 import logging
@@ -103,6 +104,41 @@ FERNET = _build_fernet()
 app = FastAPI(title="GPA Analyzer", docs_url=None, redoc_url=None, openapi_url=None)
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
+
+
+@functools.cache
+def _asset_version(path: str) -> str:
+    """Content hash of a static file. Cached for the process: the image is immutable,
+    and a reloader restarts it."""
+    return hashlib.sha256((ROOT / "static" / path).read_bytes()).hexdigest()[:12]
+
+
+def static_url(request: Request, path: str) -> str:
+    """Asset URL carrying its own content hash, so the URL changes whenever the bytes
+    do. That is what makes the year-long immutable cache below safe: without it a
+    browser keeps serving the previous deploy's app.js and never asks for a new one."""
+    return str(request.url_for("static", path=path).include_query_params(v=_asset_version(path)))
+
+
+def _is_content_pinned(request: Request, response: Response) -> bool:
+    """Whether ?v= really is the content hash of the file that was just served.
+
+    Only then does the URL pin its own bytes, and only then may the response claim to
+    be immutable. Any other ?v= is somebody else's guess: honouring it would let a
+    shared cache hold one deploy's file for a year under a URL later deploys still
+    serve. Only a 200/304 gets here, so StaticFiles has already resolved the path and
+    _asset_version is never called on anything outside static/.
+    """
+    version = request.query_params.get("v")
+    if not version or response.status_code not in {200, 304}:
+        return False
+    try:
+        return version == _asset_version(request.url.path.removeprefix("/static/"))
+    except OSError:
+        return False
+
+
+templates.env.globals["static_url"] = static_url
 
 
 class RateLimiter:
@@ -222,6 +258,16 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
     if not request.url.path.startswith("/static"):
         response.headers.setdefault("Cache-Control", "no-store")
+    else:
+        # A correctly hashed URL can be kept forever precisely because a new build
+        # gets a new URL. Everything else - the favicons, the manifest, a stale or
+        # invented ?v= - must revalidate, or one file would be stuck for a year.
+        response.headers.setdefault(
+            "Cache-Control",
+            "public, max-age=31536000, immutable"
+            if _is_content_pinned(request, response)
+            else "no-cache",
+        )
     if COOKIE_SECURE:
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"

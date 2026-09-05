@@ -9,7 +9,7 @@
     <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', path='favicon-16x16.png') }}">
     <link rel="manifest" href="{{ url_for('static', path='site.webmanifest') }}">
     <link rel="shortcut icon" href="{{ url_for('static', path='favicon.ico') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind.css') }}">
+    <link rel="stylesheet" href="{{ static_url(request, 'vendor/tailwind.css') }}">
 </head>
 <body class="min-h-screen bg-gray-50 flex items-center justify-center">
 <div class="w-full max-w-md bg-white shadow-lg rounded-xl p-8">
