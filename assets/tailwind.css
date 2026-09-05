@@ -53,3 +53,15 @@
         animation: none !important;
     }
 }
+
+/* Naming the marker is what makes it slide: the view transition sees one element
+   in two places and morphs between them, so no offsetLeft measuring, no resize
+   listener, and it handles the vertical hop when the strip wraps. */
+.tab-indicator {
+    view-transition-name: tab-indicator;
+}
+
+::view-transition-group(tab-indicator) {
+    animation-duration: 250ms;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}

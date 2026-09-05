@@ -122,9 +122,10 @@ function renderRankings(rankings) {
     }
 }
 
-const TAB_BASE = 'whitespace-nowrap px-3 py-2 -mb-px text-sm font-medium border-b-2 transition-colors'
+const TAB_BASE = 'relative whitespace-nowrap px-3 py-2 -mb-px text-sm font-medium border-b-2 transition-colors'
     + ' focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500';
-const TAB_ACTIVE = 'text-indigo-600 border-indigo-600';
+// The active underline is not a border any more: it is one element that moves.
+const TAB_ACTIVE = 'text-indigo-600 border-transparent';
 const TAB_IDLE = 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300';
 
 // A course whose 學年期 cell came back blank still has to land on a labelled tab.
@@ -226,6 +227,13 @@ function renderCourses(courses = [], semesters = []) {
         return {key, button};
     });
 
+    // A single node the active tab adopts, so the view transition slides it between
+    // tabs - across rows too, once the strip wraps - instead of fading one border
+    // out and another in.
+    const indicator = document.createElement('span');
+    indicator.className = 'tab-indicator absolute inset-x-0 -bottom-0.5 h-0.5 rounded-full bg-indigo-600';
+    indicator.setAttribute('aria-hidden', 'true');
+
     const select = (key, {fromUser = false} = {}) => {
         const active = tabButtons.find((tab) => tab.key === key) ?? tabButtons[0];
 
@@ -237,6 +245,7 @@ function renderCourses(courses = [], semesters = []) {
                 // Roving tabindex: the strip is one stop, not one per semester.
                 tab.button.tabIndex = isActive ? 0 : -1;
             }
+            active.button.appendChild(indicator);
             panel.setAttribute('aria-labelledby', active.button.id);
             renderCourseRows(active.key === null ? sorted : sorted.filter((c) => semesterOf(c) === active.key));
             // The credit summary and all three charts above stay all-time, so the list
