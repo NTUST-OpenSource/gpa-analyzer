@@ -203,14 +203,16 @@ function renderCourses(courses = [], semesters = []) {
         tabs.classList.add('hidden');
         tabs.classList.remove('flex');
         for (const attr of ['role', 'aria-labelledby', 'tabindex']) panel.removeAttribute(attr);
+        document.getElementById('courseScope').textContent = '';
         renderCourseRows(sorted);
         return;
     }
 
     // `null` is the "all semesters" key. Holding it outside the semester value space
-    // means no scraped 學年期 string can collide with it. Ascending, matching the
-    // chart x-axes above, which are drawn from this same server-side ordering.
-    const entries = [[null, '全部'], ...semesters.map((s) => [s, s || UNLABELLED_SEMESTER])];
+    // means no scraped 學年期 string can collide with it. Newest first, so the tab
+    // that opens by default sits next to 全部 rather than at the far end of the strip.
+    const newestFirst = [...semesters].reverse();
+    const entries = [[null, '全部'], ...newestFirst.map((s) => [s, s || UNLABELLED_SEMESTER])];
     const tabButtons = entries.map(([key, label], i) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -233,12 +235,20 @@ function renderCourses(courses = [], semesters = []) {
         }
         panel.setAttribute('aria-labelledby', active.button.id);
         renderCourseRows(active.key === null ? sorted : sorted.filter((c) => semesterOf(c) === active.key));
+        // The credit summary and all three charts above stay all-time, so the list
+        // has to say out loud that it is not.
+        document.getElementById('courseScope').textContent = `· ${active.button.textContent}`;
 
-        // Shareable and reload-proof; an unknown value falls back to 全部 and is dropped.
+        // Only an explicit choice goes in the URL, so a plain load stays clean and
+        // still opens on the newest semester while a shared link keeps its tab. The
+        // one exception is a stale link (?semester=113-1 after the year rolled over):
+        // that param has to go, or the URL claims a semester the page is not showing.
         const url = new URL(window.location.href);
-        if (active.key === null) url.searchParams.delete(SEMESTER_PARAM);
-        else url.searchParams.set(SEMESTER_PARAM, active.key);
-        history.replaceState(null, '', url);
+        if (fromUser && active.key !== null) url.searchParams.set(SEMESTER_PARAM, active.key);
+        else if (fromUser || url.searchParams.get(SEMESTER_PARAM) !== active.key) {
+            url.searchParams.delete(SEMESTER_PARAM);
+        }
+        if (url.href !== window.location.href) history.replaceState(null, '', url);
 
         if (!fromUser) return;
         active.button.focus();
@@ -268,11 +278,10 @@ function renderCourses(courses = [], semesters = []) {
     tabs.classList.remove('hidden');
     tabs.classList.add('flex');
 
-    // 全部 by default: hiding most of the transcript would silently break
-    // find-in-page, printing and select-all-copy, and would disagree with the
-    // all-time figures the summary and charts on this same screen report.
+    // The newest semester is what the page is opened for; 全部 is one tab away and
+    // is what find-in-page, printing and select-all-copy need.
     const requested = new URL(window.location.href).searchParams.get(SEMESTER_PARAM);
-    select(semesters.includes(requested) ? requested : null);
+    select(semesters.includes(requested) ? requested : newestFirst[0]);
 }
 
 function renderCharts(analysis, semesters) {
