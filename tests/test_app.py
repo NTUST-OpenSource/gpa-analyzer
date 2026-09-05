@@ -69,6 +69,24 @@ def test_versioned_asset_is_cached_forever(client):
     assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
 
 
+def test_invented_version_is_not_immutable(client):
+    # ?v= is only a promise when it matches; otherwise a shared cache could be made
+    # to hold this deploy's bytes for a year under a URL later deploys still serve.
+    r = client.get("/static/app.js?v=deadbeef1234")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+
+
+def test_empty_version_is_not_immutable(client):
+    assert client.get("/static/app.js?v=").headers["cache-control"] == "no-cache"
+
+
+def test_version_of_another_asset_is_not_immutable(client):
+    # A real hash, just not this file's.
+    r = client.get(f"/static/app.js?v={web._asset_version('favicon.ico')}")
+    assert r.headers["cache-control"] == "no-cache"
+
+
 def test_unversioned_asset_revalidates(client):
     # Favicons and the manifest are linked without a hash, so a year-long cache
     # would strand them; they have to ask every time.
