@@ -28,7 +28,7 @@ Credentials are encrypted and stored in the user's browser; the server keeps no 
 
 ### **Rankings and courses**
 - Class, department, and cumulative rankings
-- Full course list with course ID, credits, grade, and general-education dimension
+- Full course list with course ID, credits, grade, and general-education dimension, filterable by semester
 - Adapts to the window size
 
 <br/>
