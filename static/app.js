@@ -181,8 +181,8 @@ function renderCourseRows(courses = []) {
                 <div class="text-base font-bold text-indigo-600 ml-2">${esc(c.grade)}</div>
             </div>
             <div class="flex justify-between text-xs text-gray-600 border-t pt-2 mt-1">
-                <span>學分: ${esc(c.credits)}</span>
-                <span>向度: ${esc(c.dimension || '-')}</span>
+                <span>學分：${esc(c.credits)}</span>
+                <span>向度：${esc(c.dimension || '-')}</span>
             </div>
         `;
         courseCards.appendChild(card);
