@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import json
 import logging
@@ -103,6 +104,23 @@ FERNET = _build_fernet()
 app = FastAPI(title="GPA Analyzer", docs_url=None, redoc_url=None, openapi_url=None)
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
 app.mount("/static", StaticFiles(directory=str(ROOT / "static")), name="static")
+
+
+@functools.cache
+def _asset_version(path: str) -> str:
+    """Content hash of a static file. Cached for the process: the image is immutable,
+    and a reloader restarts it."""
+    return hashlib.sha256((ROOT / "static" / path).read_bytes()).hexdigest()[:12]
+
+
+def static_url(request: Request, path: str) -> str:
+    """Asset URL carrying its own content hash, so the URL changes whenever the bytes
+    do. That is what makes the year-long immutable cache below safe: without it a
+    browser keeps serving the previous deploy's app.js and never asks for a new one."""
+    return str(request.url_for("static", path=path).include_query_params(v=_asset_version(path)))
+
+
+templates.env.globals["static_url"] = static_url
 
 
 class RateLimiter:
@@ -222,6 +240,14 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault("Permissions-Policy", "geolocation=(), camera=(), microphone=()")
     if not request.url.path.startswith("/static"):
         response.headers.setdefault("Cache-Control", "no-store")
+    else:
+        # A hashed URL can be kept forever precisely because a new build gets a new
+        # URL. Anything unversioned - the favicons, the manifest - must revalidate,
+        # or changing one would take a year to reach anybody.
+        response.headers.setdefault(
+            "Cache-Control",
+            "public, max-age=31536000, immutable" if request.query_params.get("v") else "no-cache",
+        )
     if COOKIE_SECURE:
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
