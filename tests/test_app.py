@@ -1,3 +1,4 @@
+import hashlib
 import threading
 import time
 
@@ -50,6 +51,59 @@ def test_security_headers_are_set(client):
     assert "'unsafe-inline'" not in r.headers["content-security-policy"]
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["x-frame-options"] == "DENY"
+
+
+def test_pages_are_never_cached(client):
+    assert client.get("/login").headers["cache-control"] == "no-store"
+
+
+def test_asset_version_is_the_content_hash():
+    # The whole scheme rests on this: change the bytes, change the URL.
+    digest = hashlib.sha256((web.ROOT / "static" / "app.js").read_bytes()).hexdigest()
+    assert web._asset_version("app.js") == digest[:12]
+
+
+def test_versioned_asset_is_cached_forever(client):
+    r = client.get(f"/static/app.js?v={web._asset_version('app.js')}")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "public, max-age=31536000, immutable"
+
+
+def test_invented_version_is_not_immutable(client):
+    # ?v= is only a promise when it matches; otherwise a shared cache could be made
+    # to hold this deploy's bytes for a year under a URL later deploys still serve.
+    r = client.get("/static/app.js?v=deadbeef1234")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+
+
+def test_empty_version_is_not_immutable(client):
+    assert client.get("/static/app.js?v=").headers["cache-control"] == "no-cache"
+
+
+def test_version_of_another_asset_is_not_immutable(client):
+    # A real hash, just not this file's.
+    r = client.get(f"/static/app.js?v={web._asset_version('favicon.ico')}")
+    assert r.headers["cache-control"] == "no-cache"
+
+
+def test_unversioned_asset_revalidates(client):
+    # Favicons and the manifest are linked without a hash, so a year-long cache
+    # would strand them; they have to ask every time.
+    r = client.get("/static/favicon.ico")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"
+
+
+def test_rendered_pages_link_versioned_assets(client, monkeypatch):
+    monkeypatch.setattr(web, "get_credentials", lambda request: ("B11234567", "pw"))
+    for path, assets in [
+        ("/login", ["vendor/tailwind.css"]),
+        ("/", ["vendor/tailwind.css", "vendor/chart.umd.min.js", "app.js"]),
+    ]:
+        body = client.get(path).text
+        for asset in assets:
+            assert f"{asset}?v={web._asset_version(asset)}" in body
 
 
 def test_login_success_sets_session_and_redirects(client, monkeypatch):
