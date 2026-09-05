@@ -122,29 +122,31 @@ function renderRankings(rankings) {
     }
 }
 
-const ALL_SEMESTERS = '__all__';
-
-const TAB_BASE = 'whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 transition-colors';
+const TAB_BASE = 'whitespace-nowrap px-3 py-2 -mb-px text-sm font-medium border-b-2 transition-colors'
+    + ' focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-indigo-500';
 const TAB_ACTIVE = 'text-indigo-600 border-indigo-600';
 const TAB_IDLE = 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300';
 
+// A course whose 學年期 cell came back blank still has to land on a labelled tab.
+const UNLABELLED_SEMESTER = '未分類';
+const SEMESTER_PARAM = 'semester';
+const NO_SEMESTER_RANK = -1;
+
 const semesterOf = (course) => String(course.semester ?? '').trim();
 
-// Numeric, segment by segment: ROC year 99 precedes 100, which a string
-// comparison gets backwards. Mirrors semester_sort_key() in analyzer.py.
-const semesterParts = (semester) => (String(semester).match(/\d+/g) || []).map(Number);
-
-function compareSemesterDesc(a, b) {
-    const left = semesterParts(a);
-    const right = semesterParts(b);
-    for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
-        const diff = (right[i] ?? -1) - (left[i] ?? -1);
-        if (diff !== 0) return diff;
-    }
-    return 0;
+// analyzer.py already ordered the semesters and app.py ships that list, so index
+// into it. A second ordering implementation over here is what 66fa291 had to fix,
+// and it can only ever drift again (Unicode digits, tiebreaks, null semesters).
+function orderCourses(courses = [], semesters = []) {
+    const rank = new Map(semesters.map((s, i) => [s, i]));
+    // Newest semester first, as the table has always been; unknown semesters sink.
+    return [...courses].sort((a, b) =>
+        (rank.get(semesterOf(b)) ?? NO_SEMESTER_RANK) - (rank.get(semesterOf(a)) ?? NO_SEMESTER_RANK) ||
+        String(a.course_id ?? '').localeCompare(String(b.course_id ?? ''))
+    );
 }
 
-function renderCourseRows(courses) {
+function renderCourseRows(courses = []) {
     const tbody = document.getElementById('courseBody');
     const courseCards = document.getElementById('courseCards');
     tbody.replaceChildren();
@@ -187,49 +189,90 @@ function renderCourseRows(courses) {
     }
 }
 
-function renderCourses(courses) {
+function renderCourses(courses = [], semesters = []) {
     const tabs = document.getElementById('semesterTabs');
-    tabs.replaceChildren();
+    const panel = document.getElementById('coursePanel');
 
-    const sorted = [...(courses || [])].sort((a, b) =>
-        compareSemesterDesc(a.semester || '', b.semester || '') ||
-        (a.course_id || '').localeCompare(b.course_id || '')
-    );
-
-    // `sorted` runs newest semester first, so the tabs inherit that order.
-    const semesters = [...new Set(sorted.map(semesterOf))];
+    // Everything the render needs is computed before the first DOM write, so a bad
+    // payload can no longer leave an empty tab strip standing over stale rows.
+    const sorted = orderCourses(courses, semesters);
 
     // One semester needs no tabs: "全部" would show exactly the same rows.
     if (semesters.length < 2) {
+        tabs.replaceChildren();
         tabs.classList.add('hidden');
         tabs.classList.remove('flex');
+        for (const attr of ['role', 'aria-labelledby', 'tabindex']) panel.removeAttribute(attr);
         renderCourseRows(sorted);
         return;
     }
 
-    const select = (key) => {
-        for (const button of tabs.children) {
-            const active = button.dataset.semester === key;
-            button.className = `${TAB_BASE} ${active ? TAB_ACTIVE : TAB_IDLE}`;
-            button.setAttribute('aria-pressed', String(active));
-        }
-        renderCourseRows(key === ALL_SEMESTERS ? sorted : sorted.filter((c) => semesterOf(c) === key));
-    };
-
-    for (const [key, label] of [[ALL_SEMESTERS, '全部'], ...semesters.map((s) => [s, s])]) {
+    // `null` is the "all semesters" key. Holding it outside the semester value space
+    // means no scraped 學年期 string can collide with it. Ascending, matching the
+    // chart x-axes above, which are drawn from this same server-side ordering.
+    const entries = [[null, '全部'], ...semesters.map((s) => [s, s || UNLABELLED_SEMESTER])];
+    const tabButtons = entries.map(([key, label], i) => {
         const button = document.createElement('button');
         button.type = 'button';
-        button.dataset.semester = key;
+        button.id = `semesterTab-${i}`;
         button.textContent = label;
-        button.addEventListener('click', () => select(key));
-        tabs.appendChild(button);
-    }
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-controls', 'coursePanel');
+        return {key, button};
+    });
 
+    const select = (key, {fromUser = false} = {}) => {
+        const active = tabButtons.find((tab) => tab.key === key) ?? tabButtons[0];
+
+        for (const tab of tabButtons) {
+            const isActive = tab === active;
+            tab.button.className = `${TAB_BASE} ${isActive ? TAB_ACTIVE : TAB_IDLE}`;
+            tab.button.setAttribute('aria-selected', String(isActive));
+            // Roving tabindex: the strip is one stop, not one per semester.
+            tab.button.tabIndex = isActive ? 0 : -1;
+        }
+        panel.setAttribute('aria-labelledby', active.button.id);
+        renderCourseRows(active.key === null ? sorted : sorted.filter((c) => semesterOf(c) === active.key));
+
+        // Shareable and reload-proof; an unknown value falls back to 全部 and is dropped.
+        const url = new URL(window.location.href);
+        if (active.key === null) url.searchParams.delete(SEMESTER_PARAM);
+        else url.searchParams.set(SEMESTER_PARAM, active.key);
+        history.replaceState(null, '', url);
+
+        if (!fromUser) return;
+        active.button.focus();
+        // A shorter tab shrinks the document, and the browser clamps the scroll
+        // offset to the new maximum - which lands the reader on the footer.
+        if (tabs.getBoundingClientRect().top < 0) tabs.scrollIntoView({block: 'start'});
+    };
+
+    const ARROW_STEP = {ArrowLeft: -1, ArrowRight: 1};
+    tabButtons.forEach((tab, i) => {
+        tab.button.addEventListener('click', () => select(tab.key, {fromUser: true}));
+        tab.button.addEventListener('keydown', (event) => {
+            const step = ARROW_STEP[event.key];
+            const target = step === undefined
+                ? {Home: tabButtons[0], End: tabButtons.at(-1)}[event.key]
+                : tabButtons[(i + step + tabButtons.length) % tabButtons.length];
+            if (!target) return;
+            event.preventDefault();
+            select(target.key, {fromUser: true});
+        });
+    });
+
+    panel.setAttribute('role', 'tabpanel');
+    panel.tabIndex = 0;
+    tabs.replaceChildren(...tabButtons.map((tab) => tab.button));
     // Both classes set `display`, so they are swapped rather than combined.
     tabs.classList.remove('hidden');
     tabs.classList.add('flex');
 
-    select(semesters[0]);
+    // 全部 by default: hiding most of the transcript would silently break
+    // find-in-page, printing and select-all-copy, and would disagree with the
+    // all-time figures the summary and charts on this same screen report.
+    const requested = new URL(window.location.href).searchParams.get(SEMESTER_PARAM);
+    select(semesters.includes(requested) ? requested : null);
 }
 
 function renderCharts(analysis, semesters) {
@@ -325,13 +368,18 @@ async function loadData() {
     renderRankings(data.rankings);
     renderCharts(analysis, data.semesters);
     renderLegend('legendPopoverBody', analysis.grade_map);
-    renderCourses(data.courses);
+    renderCourses(data.courses, data.semesters);
 
     document.getElementById('fetchTime').textContent =
         `資料擷取時間：${new Date().toLocaleString('zh-TW', {hour12: false})}`;
 }
 
-loadData().catch((err) => {
-    console.error(err);
-    showError('載入資料時發生錯誤，請稍後再試或回報問題。');
-});
+// Guarded so the unit tests can require this file; neither global exists in the other.
+if (typeof document !== 'undefined') {
+    loadData().catch((err) => {
+        console.error(err);
+        showError('載入資料時發生錯誤，請稍後再試或回報問題。');
+    });
+}
+
+if (typeof module !== 'undefined') module.exports = {esc, fmtGpa, semesterOf, orderCourses};

@@ -115,23 +115,26 @@
                 <h3 class="text-lg font-semibold text-gray-800">課程清單</h3>
                 <div id="fetchTime" class="text-xs text-gray-500">資料由學校成績系統即時擷取</div>
             </div>
-            <div id="semesterTabs" class="hidden gap-1 overflow-x-auto border-b border-gray-200 mb-4"></div>
-            <div class="hidden sm:block overflow-x-auto">
-                <table class="min-w-full divide-y divide-gray-200 text-sm">
-                    <thead class="bg-gray-50">
-                    <tr>
-                        <th class="px-3 py-2 text-left font-medium text-gray-700">學期</th>
-                        <th class="px-3 py-2 text-left font-medium text-gray-700">課號</th>
-                        <th class="px-3 py-2 text-left font-medium text-gray-700">課程名稱</th>
-                        <th class="px-3 py-2 text-left font-medium text-gray-700">學分</th>
-                        <th class="px-3 py-2 text-left font-medium text-gray-700">成績</th>
-                        <th class="px-3 py-2 text-left font-medium text-gray-700">向度</th>
-                    </tr>
-                    </thead>
-                    <tbody id="courseBody" class="divide-y divide-gray-100"></tbody>
-                </table>
+            <div id="semesterTabs" role="tablist" aria-label="學期"
+                 class="hidden flex-wrap gap-1 border-b border-gray-200 mb-4 scroll-mt-20"></div>
+            <div id="coursePanel">
+                <div class="hidden sm:block overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200 text-sm">
+                        <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-3 py-2 text-left font-medium text-gray-700">學期</th>
+                            <th class="px-3 py-2 text-left font-medium text-gray-700">課號</th>
+                            <th class="px-3 py-2 text-left font-medium text-gray-700">課程名稱</th>
+                            <th class="px-3 py-2 text-left font-medium text-gray-700">學分</th>
+                            <th class="px-3 py-2 text-left font-medium text-gray-700">成績</th>
+                            <th class="px-3 py-2 text-left font-medium text-gray-700">向度</th>
+                        </tr>
+                        </thead>
+                        <tbody id="courseBody" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+                <div id="courseCards" class="sm:hidden space-y-4"></div>
             </div>
-            <div id="courseCards" class="sm:hidden space-y-4"></div>
         </section>
     </div>
 </main>
