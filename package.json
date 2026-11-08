@@ -9,7 +9,7 @@
     "test": "node --test tests/app.test.js"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "^4.1.16",
+    "@tailwindcss/cli": "^4.3.4",
     "tailwindcss": "^4.1.16"
   }
 }
