@@ -1,0 +1,45 @@
+name: Dependabot rebuild
+
+# Dependabot's token is read-only on pull_request, so this runs on
+# pull_request_target. It only ever runs for dependabot's own branches.
+on:
+  pull_request_target:
+    branches: [dev]
+    paths: [package.json, package-lock.json]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  rebuild:
+    name: Rebuild stylesheet
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci --ignore-scripts
+
+      - run: npm run build
+
+      - name: Commit rebuilt stylesheet
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          git diff --quiet -- static/vendor/tailwind.css && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build: rebuild tailwind.css" -- static/vendor/tailwind.css
+          git push
+          # Pushes made with GITHUB_TOKEN do not trigger CI, so start it by hand.
+          gh workflow run ci.yml --ref "${BRANCH}"
